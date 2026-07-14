@@ -446,6 +446,10 @@ h3 { font-size: 16px; }
 .settings-line .line-icon { width: 27px; color: var(--mint-deep); font-size: 20px; text-align: center; }
 .settings-line span:last-child { flex: 1; }
 .settings-line small { color: var(--muted); font-size: 11px; font-weight: 700; }
+.backup-note { line-height: 1.6; }
+.backup-auto-note { margin-top: 10px; color: var(--mint-deep); font-size: 12px; font-weight: 800; line-height: 1.5; }
+.backup-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-top: 13px; }
+.backup-card .modal-actions { margin-top: 12px; }
 .category-summary { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 .category-summary-item { display: flex; align-items: center; gap: 8px; padding: 10px; border-radius: 15px; background: rgba(216, 245, 239, .55); font-size: 12px; font-weight: 800; }
 .category-summary-item .category-icon { width: 34px; height: 34px; border-radius: 12px; font-size: 18px; }
@@ -571,6 +575,7 @@ h3 { font-size: 16px; }
   .page-host { padding-left: 12px; padding-right: 12px; }
   .mascot { width: 122px; height: 122px; }
   .hero { min-height: 146px; }
+  .backup-actions { grid-template-columns: 1fr; }
   .category-grid { gap: 11px 4px; }
   .category-icon { width: 39px; height: 39px; font-size: 20px; }
   .record-copy span { max-width: 145px; }

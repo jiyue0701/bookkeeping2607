@@ -2,6 +2,10 @@
 
 const STORAGE_KEY = "bookkeeping2607.pwa.state";
 const SCHEMA_VERSION = 1;
+const BACKUP_FORMAT = "migao-bookkeeping-backup";
+const BACKUP_VERSION = 1;
+const AUTO_BACKUP_DB = "migao-bookkeeping-local-backup";
+const AUTO_BACKUP_STORE = "snapshots";
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
 
 const TYPE_META = {
@@ -54,6 +58,8 @@ const ui = {
 
 let records = [];
 let toastTimer = null;
+let autoBackupTimer = null;
+let midnightBackupTimer = null;
 records = loadRecords();
 
 function categoryObjects(type) {
@@ -126,8 +132,244 @@ function persistRecords() {
       schemaVersion: SCHEMA_VERSION,
       records
     }));
+    scheduleAutoBackup();
+    return true;
   } catch (_) {
     showToast("本机存储空间不足，请不要清除当前网页数据");
+    return false;
+  }
+}
+
+function backupFileStamp(date = new Date()) {
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}`;
+}
+
+function localDayStamp(date = new Date()) {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function buildBackupPayload() {
+  return {
+    format: BACKUP_FORMAT,
+    formatVersion: BACKUP_VERSION,
+    appName: "米糕记账",
+    exportedAt: new Date().toISOString(),
+    recordCount: records.length,
+    records: records.map((record) => ({ ...record }))
+  };
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function exportData() {
+  const filename = `米糕记账-备份-${backupFileStamp()}.json`;
+  const payload = JSON.stringify(buildBackupPayload(), null, 2);
+  const blob = new Blob([payload], { type: "application/json;charset=utf-8" });
+  const file = typeof File === "function" ? new File([blob], filename, { type: "application/json" }) : null;
+
+  if (file && typeof navigator.share === "function") {
+    let canShare = true;
+    try {
+      if (typeof navigator.canShare === "function") canShare = navigator.canShare({ files: [file] });
+      if (canShare) {
+        await navigator.share({
+          title: "米糕记账备份",
+          text: `${records.length} 笔账单备份文件`,
+          files: [file]
+        });
+        showToast("备份已准备好，请保存到“文件”或 iCloud 云盘");
+        return;
+      }
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+    }
+  }
+
+  downloadBlob(blob, filename);
+  showToast("备份文件已生成，请保存到“文件”或 iCloud 云盘");
+}
+
+function recordTimestamp(record) {
+  const timestamp = Date.parse(record.updatedAt || record.createdAt || record.occurredAt || "");
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function mergeRecords(current, incoming) {
+  const merged = new Map(current.map((record) => [record.id, record]));
+  let added = 0;
+  let updated = 0;
+
+  incoming.forEach((record) => {
+    const existing = merged.get(record.id);
+    if (!existing) {
+      merged.set(record.id, record);
+      added += 1;
+    } else if (recordTimestamp(record) > recordTimestamp(existing)) {
+      merged.set(record.id, record);
+      updated += 1;
+    }
+  });
+
+  return { records: Array.from(merged.values()), added, updated, imported: incoming.length };
+}
+
+async function importData(file) {
+  if (!file) return;
+
+  try {
+    const parsed = JSON.parse(await file.text());
+    if (parsed?.format && parsed.format !== BACKUP_FORMAT) throw new Error("backup format mismatch");
+    const sourceRecords = Array.isArray(parsed) ? parsed : parsed?.records;
+    if (!Array.isArray(sourceRecords)) throw new Error("records missing");
+
+    const imported = sourceRecords.map(normalizeRecord).filter((record) => record.amountCents > 0);
+    const previousRecords = records;
+    const result = mergeRecords(records, imported);
+    records = result.records;
+    if (!persistRecords()) {
+      records = previousRecords;
+      render();
+      return;
+    }
+
+    render();
+    const updatedText = result.updated ? `，更新 ${result.updated} 笔` : "";
+    showToast(`已导入 ${result.imported} 笔，新增 ${result.added} 笔${updatedText}`);
+  } catch (_) {
+    showToast("导入失败，请选择米糕记账导出的 JSON 备份文件");
+  }
+}
+
+function openAutoBackupDB() {
+  if (!window.indexedDB) return Promise.resolve(null);
+
+  return new Promise((resolve) => {
+    let request;
+    try {
+      request = window.indexedDB.open(AUTO_BACKUP_DB, 1);
+    } catch (_) {
+      resolve(null);
+      return;
+    }
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(AUTO_BACKUP_STORE)) {
+        request.result.createObjectStore(AUTO_BACKUP_STORE, { keyPath: "id" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => resolve(null);
+  });
+}
+
+async function saveAutoBackup() {
+  const db = await openAutoBackupDB();
+  if (!db) return;
+
+  const now = new Date();
+  const payload = buildBackupPayload();
+  const snapshot = {
+    ...payload,
+    id: "latest",
+    savedAt: now.toISOString(),
+    day: localDayStamp(now)
+  };
+  const dailySnapshot = { ...snapshot, id: `day-${snapshot.day}` };
+
+  try {
+    const transaction = db.transaction(AUTO_BACKUP_STORE, "readwrite");
+    const store = transaction.objectStore(AUTO_BACKUP_STORE);
+    store.put(snapshot);
+    store.put(dailySnapshot);
+    const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
+    const cutoffId = `day-${localDayStamp(cutoff)}`;
+    const keysRequest = store.getAllKeys();
+    keysRequest.onsuccess = () => {
+      keysRequest.result
+        .filter((key) => typeof key === "string" && key.startsWith("day-") && key < cutoffId)
+        .forEach((key) => store.delete(key));
+    };
+    transaction.oncomplete = () => db.close();
+    transaction.onerror = () => db.close();
+  } catch (_) {
+    db.close();
+  }
+}
+
+function scheduleAutoBackup() {
+  if (autoBackupTimer) window.clearTimeout(autoBackupTimer);
+  autoBackupTimer = window.setTimeout(() => {
+    autoBackupTimer = null;
+    saveAutoBackup();
+  }, 250);
+}
+
+function scheduleMidnightBackup() {
+  if (midnightBackupTimer) window.clearTimeout(midnightBackupTimer);
+  const now = new Date();
+  const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 5);
+  midnightBackupTimer = window.setTimeout(() => {
+    saveAutoBackup();
+    scheduleMidnightBackup();
+  }, Math.max(1000, nextMidnight.getTime() - now.getTime()));
+}
+
+async function restoreAutoBackupIfNeeded() {
+  if (records.length) {
+    scheduleAutoBackup();
+    return;
+  }
+
+  const db = await openAutoBackupDB();
+  if (!db) {
+    scheduleAutoBackup();
+    return;
+  }
+
+  try {
+    const snapshot = await new Promise((resolve) => {
+      const transaction = db.transaction(AUTO_BACKUP_STORE, "readonly");
+      const request = transaction.objectStore(AUTO_BACKUP_STORE).get("latest");
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => resolve(null);
+    });
+    db.close();
+    const recovered = snapshot?.records?.map(normalizeRecord).filter((record) => record.amountCents > 0) || [];
+    if (!recovered.length) {
+      scheduleAutoBackup();
+      return;
+    }
+
+    records = recovered;
+    if (persistRecords()) {
+      render();
+      showToast(`已从本机自动快照恢复 ${records.length} 笔账单`);
+    }
+  } catch (_) {
+    db.close();
+    scheduleAutoBackup();
+  }
+}
+
+async function clearAutoBackup() {
+  const db = await openAutoBackupDB();
+  if (!db) return;
+  try {
+    const transaction = db.transaction(AUTO_BACKUP_STORE, "readwrite");
+    transaction.objectStore(AUTO_BACKUP_STORE).clear();
+    transaction.oncomplete = () => db.close();
+    transaction.onerror = () => db.close();
+  } catch (_) {
+    db.close();
   }
 }
 
@@ -595,10 +837,18 @@ function renderSettings() {
           <div class="settings-line"><span class="line-icon">▣</span><span>账单保存在本机浏览器</span><small>${records.length} 笔</small></div>
           <div class="settings-line"><span class="line-icon">¥</span><span>人民币元，固定两位小数</span></div>
           <div class="settings-line"><span class="line-icon">⌁</span><span>网页更新不改变本地数据</span></div>
+          <div class="settings-line"><span class="line-icon">↻</span><span>本机自动快照，打开或保存后更新</span></div>
         </div>
       </section>
-      <section class="paper-card">
-        <div class="section-heading"><div><h2>数据管理</h2><div class="subtle">暂不做导出，先提供演示和清空</div></div></div>
+      <section class="paper-card backup-card">
+        <div class="section-heading"><div><h2>数据管理</h2><div class="subtle">换手机或清理缓存前，先保存一份备份</div></div><span class="small-chip">${records.length} 笔</span></div>
+        <div class="subtle backup-note">账单默认只保存在这台设备。网页更新不会清掉它，但换手机、删除网站数据或清理浏览器缓存可能会导致本机账单消失。导入会和当前账单合并，不会直接覆盖。</div>
+        <div class="backup-auto-note">↻ 本机自动快照：打开或保存后自动更新；应用保持打开时会在跨日后再次更新。</div>
+        <div class="backup-actions">
+          <button class="action-button secondary" type="button" data-action="export-data">导出 JSON 备份</button>
+          <button class="action-button secondary" type="button" data-action="import-data">导入 JSON 备份</button>
+          <input type="file" accept="application/json,.json" data-backup-input hidden>
+        </div>
         <div class="modal-actions">
           <button class="action-button secondary" type="button" data-action="demo-data">加入演示账单</button>
           <button class="action-button danger" type="button" data-action="clear-data">清空本机全部账单</button>
@@ -657,12 +907,12 @@ function renderHelpModal() {
           <div class="help-step"><b>2</b><div>点击底部或顶部的<strong>分享</strong>按钮。</div></div>
            <div class="help-step"><b>3</b><div>选择<strong>添加到主屏幕</strong>，确认名称为“米糕记账”。</div></div>
            <div class="help-step"><b>4</b><div>从主屏幕打开图标，就会以独立网页 App 的样式运行。</div></div>
-           <p>数据保存在本机浏览器里。不要用无痕模式，也不要清除 Safari 网站数据；换手机前暂时没有自动同步和导出功能。</p>
+           <p>数据保存在本机浏览器里。换手机或清除网站数据前，请到“我的 → 数据管理”导出 JSON 备份；在新设备打开后，再用“导入 JSON 备份”恢复。</p>
           <section class="quick-help-card">
             <h3>双击辅助触控，快速记一笔</h3>
             <p>发布完成后，复制专用网址，在 iPhone「快捷指令」中新建一个“打开 URL”快捷指令并命名。然后到“设置 → 辅助功能 → 触控 → 辅助触控 → 双击”里选择它（不同 iOS 版本的菜单名称可能略有不同）。</p>
             <p>这个入口会直接打开“快速记一笔”页面，输入金额后保存；如果双击动作列表没有直接显示快捷指令，可把快捷指令加入辅助触控顶层菜单，或改用“背部轻点”。</p>
-            <p><strong>数据提醒：</strong>主屏幕独立 Web App 和 Safari 可能是两套本地账单。当前没有同步/导出功能；要使用这个快捷入口，建议日常也用 Safari 模式，不要同时混用两种入口。</p>
+            <p><strong>数据提醒：</strong>主屏幕独立 Web App 和 Safari 可能是两套本地账单。当前没有自动云同步，但支持手动导出与导入；要使用这个快捷入口，建议日常固定使用同一种入口。</p>
             <button class="action-button secondary" type="button" data-action="copy-quick-url">复制快速记账网址</button>
           </section>
          </div>
@@ -753,8 +1003,14 @@ function clearData() {
     return;
   }
   if (!window.confirm("确定清空这台设备上的全部账单吗？此操作不能撤销。")) return;
+  const previousRecords = records;
   records = [];
-  persistRecords();
+  if (!persistRecords()) {
+    records = previousRecords;
+    render();
+    return;
+  }
+  clearAutoBackup();
   render();
   showToast("本机账单已清空");
 }
@@ -817,6 +1073,12 @@ function handleClick(event) {
     case "copy-quick-url":
       copyQuickEntryURL();
       break;
+    case "export-data":
+      exportData();
+      break;
+    case "import-data":
+      document.querySelector("[data-backup-input]")?.click();
+      break;
     case "select-type":
       if (ui.draft) {
         ui.draft.type = actionElement.dataset.type;
@@ -871,12 +1133,20 @@ function handleInput(event) {
   if (field && ui.draft) ui.draft[field.dataset.draftField] = field.value;
 }
 
+function handleBackupInput(event) {
+  const input = event.target.closest("[data-backup-input]");
+  if (!input || !input.files?.[0]) return;
+  importData(input.files[0]);
+  input.value = "";
+}
+
 function init() {
   ["gesturestart", "gesturechange", "gestureend"].forEach((eventName) => {
     document.addEventListener(eventName, (event) => event.preventDefault(), { passive: false });
   });
   document.addEventListener("click", handleClick);
   document.addEventListener("input", handleInput);
+  document.addEventListener("change", handleBackupInput);
   document.addEventListener("submit", (event) => {
     if (event.target.matches('[data-form="add-record"]')) saveDraft(event);
   });
@@ -892,6 +1162,8 @@ function init() {
   if (navigator.storage && typeof navigator.storage.persist === "function") {
     navigator.storage.persist().catch(() => {});
   }
+  scheduleMidnightBackup();
+  restoreAutoBackupIfNeeded();
 }
 
 init();
