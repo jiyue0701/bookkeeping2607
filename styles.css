@@ -16,7 +16,12 @@
 
 * { box-sizing: border-box; }
 
-html { min-height: 100%; background: var(--mint-wash); }
+html {
+  min-height: 100%;
+  background: var(--mint-wash);
+  touch-action: pan-y;
+  overscroll-behavior-x: none;
+}
 
 body {
   margin: 0;
@@ -29,6 +34,8 @@ body {
   color: var(--ink);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Rounded", "PingFang SC", "Microsoft YaHei", sans-serif;
   -webkit-font-smoothing: antialiased;
+  touch-action: pan-y;
+  overscroll-behavior-x: none;
 }
 
 button, input, select, textarea { font: inherit; }
@@ -173,6 +180,14 @@ h3 { font-size: 16px; }
   padding-bottom: 15px;
   background: linear-gradient(180deg, #fffefc, #f9faf4);
 }
+
+.migao-reminder-card { padding-bottom: 15px; }
+.migao-reminder-card .section-heading { margin-bottom: 8px; }
+.reminder-mark { font-size: 25px; }
+.reminder-copy { line-height: 1.6; }
+.home-help-card { padding: 13px 16px; }
+.home-help-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.home-install-button { border: 0; cursor: pointer; }
 
 .receipt-card::before {
   content: "";

@@ -52,15 +52,29 @@ const ui = {
   draft: null
 };
 
-let records = loadRecords();
+let records = [];
 let toastTimer = null;
+records = loadRecords();
 
 function categoryObjects(type) {
-  return CATEGORY_SETS[type].map(([id, name, icon, group]) => ({ id, name, icon, group }));
+  return CATEGORY_SETS[type].map(([id, name, icon, group], order) => ({ id, name, icon, group, order }));
+}
+
+function categoryUsage(type) {
+  const counts = new Map();
+  records.forEach((record) => {
+    if (record.type !== type) return;
+    counts.set(record.categoryId, (counts.get(record.categoryId) || 0) + 1);
+  });
+  return counts;
 }
 
 function categoriesFor(type) {
-  return categoryObjects(type);
+  const usage = categoryUsage(type);
+  return categoryObjects(type).sort((left, right) => {
+    const countDiff = (usage.get(right.id) || 0) - (usage.get(left.id) || 0);
+    return countDiff || left.order - right.order;
+  });
 }
 
 function makeId() {
@@ -371,10 +385,8 @@ function renderHome() {
     <div class="page page-home">
       <section class="hero">
         <div class="hero-copy">
-          <span class="offline-chip">● 离线可用</span>
           <h1>欢迎光临 ✦</h1>
           <p>默认账本 · ${longDateLabel(today)}</p>
-          <button class="small-chip" style="border:0; margin-top:12px; cursor:pointer;" type="button" data-action="help">怎么安装到 iPhone？</button>
         </div>
         <img class="mascot" src="./assets/black-shiba-mascot.png" alt="米糕黑柴记账助手">
       </section>
@@ -394,10 +406,18 @@ function renderHome() {
         <div class="receipt-total"><span>今日支出</span><strong class="expense-text">${formatMoney(todayExpense)}</strong></div>
       </section>
 
-      <section class="paper-card">
-        <div class="section-heading"><div><h2>米糕提醒</h2><div class="subtle">账单只保存在这台设备的浏览器里</div></div><span class="small-chip">本地保存</span></div>
-        <div class="subtle" style="line-height:1.65;">不要使用无痕模式，也不要清除 Safari 的网站数据。以后如果需要备份，我们再单独加入导出或云端同步。</div>
+      <section class="paper-card migao-reminder-card">
+        <div class="section-heading"><div><h2>米糕提醒</h2><div class="subtle">账单只保存在这台设备的浏览器里</div></div><span class="reminder-mark" aria-hidden="true">🐕</span></div>
+        <p class="subtle reminder-copy">不要使用无痕模式，也不要清除 Safari 的网站数据。以后更新功能时，会继续保留这台设备里的账单。</p>
       </section>
+
+      <section class="paper-card home-help-card">
+        <div class="home-help-row">
+          <span class="offline-chip">● 离线可用</span>
+          <button class="small-chip home-install-button" type="button" data-action="help">怎么安装到 iPhone？</button>
+        </div>
+      </section>
+
     </div>`;
 }
 
@@ -563,7 +583,7 @@ function renderSettings() {
     <div class="page">
       <div class="page-title-row"><div><span class="eyebrow">本地 · 米糕</span><h1>我的</h1></div><span class="small-chip">v1.0</span></div>
       <section class="paper-card">
-        <div class="settings-brand"><img class="mascot small" src="./assets/black-shiba-mascot.png" alt="米糕黑柴"><div class="settings-brand-copy"><strong>2607 记账 App</strong><span>记录每一个值得记住的日常</span></div></div>
+        <div class="settings-brand"><img class="mascot small" src="./assets/black-shiba-mascot.png" alt="米糕黑柴"><div class="settings-brand-copy"><strong>米糕记账</strong><span>记录每一个值得记住的日常</span></div></div>
       </section>
       <section class="paper-card">
         <div class="section-heading"><div><h2>基础分类</h2><div class="subtle">第一版内置常用分类</div></div><span class="small-chip">28 类支出</span></div>
@@ -608,13 +628,15 @@ function renderAddModal() {
             <div class="amount-entry"><em class="${meta.className}-text">¥</em><input data-draft-field="amountText" inputmode="decimal" autocomplete="off" placeholder="0.00" value="${escapeHtml(draft.amountText)}" aria-label="金额"></div>
           </section>
           <section class="paper-card form-card">
-            <div class="section-heading"><div><h2>选择分类</h2><div class="subtle">基础分类</div></div></div>
+            <div class="field"><label for="record-note">备注</label><textarea id="record-note" data-draft-field="note" placeholder="例如：午餐、打车上班">${escapeHtml(draft.note)}</textarea></div>
+          </section>
+          <section class="paper-card form-card">
+            <div class="section-heading"><div><h2>选择分类</h2><div class="subtle">基础分类 · 常用分类优先</div></div></div>
             <div class="category-grid">${categories.map((category) => `<button class="category-button ${draft.categoryId === category.id ? "selected" : ""}" type="button" data-action="select-category" data-category="${category.id}"><span class="category-icon ${meta.className}">${category.icon}</span><span>${category.name}</span></button>`).join("")}</div>
           </section>
           <section class="paper-card form-card">
             <div class="field-grid">
               <div class="field"><label for="occurred-at">日期和时间</label><input id="occurred-at" type="datetime-local" data-draft-field="occurredAt" value="${escapeHtml(draft.occurredAt)}"></div>
-              <div class="field"><label for="record-note">备注</label><textarea id="record-note" data-draft-field="note" placeholder="例如：午餐、打车上班">${escapeHtml(draft.note)}</textarea></div>
               <div class="field"><label for="account-name">${draft.type === "transfer" ? "转出账户" : "账户"}</label><input id="account-name" data-draft-field="accountName" value="${escapeHtml(draft.accountName)}" placeholder="例如：微信"></div>
               ${draft.type === "transfer" ? `<div class="field"><label for="destination-account">转入账户</label><input id="destination-account" data-draft-field="destinationAccountName" value="${escapeHtml(draft.destinationAccountName)}" placeholder="例如：银行卡"></div>` : ""}
             </div>
@@ -633,7 +655,7 @@ function renderHelpModal() {
         <div class="help-copy">
           <div class="help-step"><b>1</b><div>用 <strong>Safari</strong> 打开这个 PWA 的网址。</div></div>
           <div class="help-step"><b>2</b><div>点击底部或顶部的<strong>分享</strong>按钮。</div></div>
-           <div class="help-step"><b>3</b><div>选择<strong>添加到主屏幕</strong>，确认名称为“2607记账”。</div></div>
+           <div class="help-step"><b>3</b><div>选择<strong>添加到主屏幕</strong>，确认名称为“米糕记账”。</div></div>
            <div class="help-step"><b>4</b><div>从主屏幕打开图标，就会以独立网页 App 的样式运行。</div></div>
            <p>数据保存在本机浏览器里。不要用无痕模式，也不要清除 Safari 网站数据；换手机前暂时没有自动同步和导出功能。</p>
           <section class="quick-help-card">
@@ -850,6 +872,9 @@ function handleInput(event) {
 }
 
 function init() {
+  ["gesturestart", "gesturechange", "gestureend"].forEach((eventName) => {
+    document.addEventListener(eventName, (event) => event.preventDefault(), { passive: false });
+  });
   document.addEventListener("click", handleClick);
   document.addEventListener("input", handleInput);
   document.addEventListener("submit", (event) => {

@@ -1,4 +1,4 @@
-# 2607 记账 PWA
+# 米糕记账 PWA
 
 这是给 iPhone 使用的网页版 App（PWA），不需要 App Store、Apple Developer Program、Mac 或每 7 天重签。用 Safari 打开网址后，可以添加到 iPhone 主屏幕，之后以独立网页 App 的样式运行。
 
@@ -21,7 +21,7 @@
 1. 用 Safari 打开 PWA 的 HTTPS 网页地址。
 2. 点击分享按钮。
 3. 选择“添加到主屏幕”。
-4. 确认名称为“2607记账”，从主屏幕图标打开。
+4. 确认名称为“米糕记账”，从主屏幕图标打开。
 
 加入主屏幕后，网站清单中的 `display: standalone` 会让它以独立网页 App 形式打开。Apple 对 iPhone 主屏幕网页 App 的说明见：[Configuring Web Applications](https://developer.apple.com/library/archive/documentation/AppleApplications/Reference/SafariWebContent/ConfiguringWebApplications/ConfiguringWebApplications.html)。
 
