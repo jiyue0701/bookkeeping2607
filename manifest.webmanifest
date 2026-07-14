@@ -1,0 +1,20 @@
+{
+  "name": "2607 记账",
+  "short_name": "2607记账",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#c2efe8",
+  "theme_color": "#2abdb0",
+  "description": "米糕陪你记录每一笔日常支出与收入",
+  "icons": [
+    {
+      "src": "./assets/black-shiba-mascot.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

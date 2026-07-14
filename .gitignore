@@ -1,0 +1,12 @@
+.DS_Store
+Thumbs.db
+node_modules/
+.env
+.env.*
+
+# 本项目账单保存在浏览器 localStorage，不应作为文件上传
+*.db
+*.sqlite
+*.sqlite3
+backup/
+backups/
