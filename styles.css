@@ -488,7 +488,7 @@ h3 { font-size: 16px; }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 4px;
   min-height: 58px;
   border: 0;
   background: transparent;
@@ -499,20 +499,58 @@ h3 { font-size: 16px; }
 }
 
 .nav-item.active { color: var(--ink); }
-.nav-icon { height: 23px; font-size: 24px; line-height: 22px; }
-.nav-add {
+.nav-icon {
   display: grid;
   place-items: center;
-  width: 65px;
-  height: 65px;
-  margin: -25px auto 0;
-  border: 4px solid white;
-  border-radius: 50%;
-  background: var(--yellow);
+  width: 28px;
+  height: 28px;
+}
+.nav-icon svg,
+.nav-add-core svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.3;
+}
+.nav-item.active .nav-icon {
+  color: var(--ink);
+  filter: drop-shadow(0 2px 0 rgba(42, 189, 176, .12));
+}
+.nav-add {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 3px;
+  width: 76px;
+  min-height: 76px;
+  margin: -28px auto -4px;
+  border: 0;
+  background: transparent;
   color: var(--ink);
   cursor: pointer;
+  font-size: 12px;
+  font-weight: 950;
+}
+.nav-add-core {
+  display: grid;
+  place-items: center;
+  width: 66px;
+  height: 66px;
+  border: 5px solid white;
+  border-radius: 50%;
+  background: var(--yellow);
   box-shadow: 0 9px 17px rgba(224, 172, 17, .3);
-  font-size: 31px;
+}
+.nav-add-core svg {
+  width: 31px;
+  height: 31px;
+  stroke-width: 2.2;
+}
+.nav-add-label {
   line-height: 1;
 }
 
