@@ -1228,16 +1228,68 @@ function renderTrend(monthRecords) {
   const daily = dailyExpenses(ui.monthCursor);
   const max = Math.max(...daily.map((item) => item.amountCents), 1);
   const total = sumCents(monthRecords, "expense");
-  const bars = daily.map((item) => {
-    const height = item.amountCents ? Math.max(5, (item.amountCents / max) * 100) : 2;
-    const label = item.date.getDate() % 5 === 0 || item.date.getDate() === 1 ? item.date.getDate() : "";
-    return `<button class="bar-slot" type="button" data-action="trend-day" data-date="${dateKey(item.date)}" data-amount="${item.amountCents}" aria-label="${dayLabel(item.date)} ${formatMoney(item.amountCents)}"><div class="bar" style="--bar-height:${height}%"></div><span>${label}</span></button>`;
+  const chart = { width: 620, height: 220, left: 26, right: 20, top: 28, bottom: 42 };
+  const baseY = chart.height - chart.bottom;
+  const plotHeight = baseY - chart.top;
+  const spanX = chart.width - chart.left - chart.right;
+  const points = daily.map((item, index) => {
+    const x = chart.left + (spanX * index) / Math.max(daily.length - 1, 1);
+    const y = baseY - (item.amountCents / max) * plotHeight;
+    return { ...item, x, y };
+  });
+  const lastPoint = points[points.length - 1];
+  const linePath = points.map((point, index) => `${index ? "L" : "M"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ");
+  const areaPath = `M ${chart.left} ${baseY} ${points.map((point) => `L ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ")} L ${lastPoint.x.toFixed(1)} ${baseY} Z`;
+  const gridLines = [0, 0.25, 0.5, 0.75, 1].map((ratio) => {
+    const y = chart.top + plotHeight * ratio;
+    return `<line class="trend-grid-line" x1="${chart.left}" y1="${y.toFixed(1)}" x2="${chart.width - chart.right}" y2="${y.toFixed(1)}"></line>`;
   }).join("");
+  const dayLabels = points
+    .filter((point) => point.date.getDate() === 1 || point.date.getDate() % 5 === 0 || point === lastPoint)
+    .map((point) => `<text class="trend-axis-label" x="${point.x.toFixed(1)}" y="${chart.height - 12}" text-anchor="middle">${pad(point.date.getDate())}</text>`)
+    .join("");
+  const pointNodes = points.map((point) => `
+    <g class="trend-point-hit" data-action="trend-day" data-date="${dateKey(point.date)}" data-amount="${point.amountCents}" role="button" aria-label="${dayLabel(point.date)} ${formatMoney(point.amountCents)}">
+      <circle class="trend-hit-area" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="11"></circle>
+      <circle class="trend-point ${point.amountCents ? "has-value" : ""}" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="${point.amountCents ? 4.5 : 3.5}"></circle>
+    </g>`).join("");
+  const peak = points.reduce((best, point) => point.amountCents > best.amountCents ? point : best, points[0]);
+  const tooltipWidth = 128;
+  const tooltipX = Math.min(Math.max(peak.x - tooltipWidth / 2, 8), chart.width - tooltipWidth - 8);
+  const tooltip = `
+    <g class="trend-tooltip">
+      <rect x="${tooltipX.toFixed(1)}" y="6" width="${tooltipWidth}" height="48" rx="8"></rect>
+      <path d="M ${peak.x.toFixed(1)} 60 l -7 -8 h 14 Z"></path>
+      <text x="${(tooltipX + 16).toFixed(1)}" y="27">${pad(peak.date.getMonth() + 1)}.${pad(peak.date.getDate())}</text>
+      <text class="trend-tooltip-amount" x="${(tooltipX + 16).toFixed(1)}" y="46">${formatMoney(peak.amountCents)}</text>
+    </g>`;
+  const expenseCount = monthRecords.filter((record) => record.type === "expense").length;
+  const activeDays = daily.filter((item) => item.amountCents > 0).length || 1;
+  const average = Math.round(total / activeDays);
+  const lineChart = `
+    <div class="trend-chart-shell">
+      <svg class="trend-chart" viewBox="0 0 ${chart.width} ${chart.height}" width="${chart.width}" height="${chart.height}" role="img" aria-label="本月支出趋势折线图">
+        <defs>
+          <linearGradient id="trendAreaGradient" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stop-color="#ff6d82" stop-opacity=".20"></stop>
+            <stop offset="100%" stop-color="#ff6d82" stop-opacity="0"></stop>
+          </linearGradient>
+        </defs>
+        ${gridLines}
+        <path class="trend-area" d="${areaPath}"></path>
+        <path class="trend-line" d="${linePath}"></path>
+        ${pointNodes}
+        ${tooltip}
+        <line class="trend-axis" x1="${chart.left}" y1="${baseY}" x2="${chart.width - chart.right}" y2="${baseY}"></line>
+        ${dayLabels}
+      </svg>
+      <div class="trend-summary">本月已产生 <strong>${expenseCount}</strong> 笔支出，活跃日均 <strong>${formatMoney(average)}</strong></div>
+    </div>`;
 
   return `
     <section class="paper-card stats-card">
       <div class="section-heading"><div><h2>支出趋势</h2><div class="subtle">每天的支出金额</div></div><span class="expense-text" style="font-weight:900;">${formatMoney(total)}</span></div>
-      ${total ? `<div class="chart-wrap"><div class="bar-chart">${bars}</div></div><div class="chart-note">左右滑动查看整月 · 点击柱子可看当天金额</div>` : renderEmptyState("还没有支出趋势", "开始记账后，这里会慢慢长出曲线", "📊")}
+      ${total ? `<div class="chart-wrap">${lineChart}</div><div class="chart-note">左右滑动查看整月 · 点击折线点可看当天金额</div>` : renderEmptyState("还没有支出趋势", "开始记账后，这里会慢慢长出曲线", "📊")}
     </section>`;
 }
 

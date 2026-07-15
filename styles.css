@@ -354,12 +354,24 @@ h3 { font-size: 16px; }
 .category-button span:last-child { display: block; overflow: hidden; font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 
 .stats-card { padding-bottom: 15px; }
-.chart-wrap { margin-top: 10px; overflow-x: auto; padding: 9px 0 0; }
-.bar-chart { display: flex; align-items: flex-end; gap: 3px; min-width: 570px; height: 174px; padding: 0 5px; border-bottom: 1px solid var(--line); }
-.bar-slot { display: flex; flex: 1 0 15px; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 6px; border: 0; background: transparent; cursor: pointer; padding: 0; }
-.bar-slot:active .bar { transform: scaleY(.94); opacity: .82; }
-.bar { width: 10px; min-height: 2px; height: var(--bar-height); border-radius: 8px 8px 2px 2px; background: linear-gradient(180deg, #ff7a82, var(--coral)); }
-.bar-slot span { color: var(--muted); font-size: 9px; }
+.chart-wrap { margin-top: 10px; overflow-x: auto; padding: 9px 0 2px; }
+.trend-chart-shell { min-width: 620px; padding: 0 0 12px; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: rgba(255, 255, 255, .74); }
+.trend-chart { display: block; width: 620px; height: 220px; }
+.trend-grid-line { stroke: #eef2ef; stroke-width: 1; }
+.trend-axis { stroke: #bfc8c4; stroke-dasharray: 5 6; stroke-width: 1.2; }
+.trend-axis-label { fill: var(--muted); font-size: 12px; font-weight: 700; }
+.trend-area { fill: url(#trendAreaGradient); }
+.trend-line { fill: none; stroke: var(--coral); stroke-linecap: round; stroke-linejoin: round; stroke-width: 3; }
+.trend-hit-area { fill: transparent; cursor: pointer; }
+.trend-point { fill: #fff; stroke: #cfd8d5; stroke-width: 2; }
+.trend-point.has-value { fill: var(--coral); stroke: #fff; stroke-width: 2.5; }
+.trend-point-hit:active .trend-point { opacity: .72; }
+.trend-tooltip rect { fill: #fff0f3; stroke: #ffd6de; stroke-width: 1; }
+.trend-tooltip path { fill: #fff0f3; }
+.trend-tooltip text { fill: #7f8583; font-size: 12px; font-weight: 800; }
+.trend-tooltip .trend-tooltip-amount { fill: var(--coral); font-size: 14px; font-weight: 900; }
+.trend-summary { width: calc(100% - 48px); margin: 0 auto; padding: 10px 14px; border-radius: 8px; background: #f2f1ed; color: var(--muted); font-size: 13px; font-weight: 800; text-align: center; }
+.trend-summary strong { color: var(--coral); font-size: 15px; }
 .chart-note { margin-top: 10px; color: var(--muted); font-size: 12px; }
 
 .ranking-list { display: grid; gap: 15px; }
