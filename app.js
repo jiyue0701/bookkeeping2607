@@ -468,6 +468,7 @@ async function mergeCloudBackup({
 async function syncCloudNow(manual = true) {
   const merged = await mergeCloudBackup({ manual, uploadAfterMerge: false });
   if (!cloudSyncConfig?.enabled) return false;
+  if (!merged) return false;
   if (merged || cloudSyncDirty || manual) {
     return uploadCloudBackup(manual);
   }
@@ -517,13 +518,15 @@ async function enableCloudSync() {
       encryptionKey: identity.encryptionKey
     });
     const synced = await syncCloudNow(false);
-    if (!synced) throw new Error("sync failed");
+    if (!synced) throw new Error(cloudSyncStatus || "sync failed");
     cloudStartupSyncDone = true;
     cloudSyncStatus = "云备份已开启；以后打开自动合并，记账后自动上传";
     showToast("云备份已开启");
   } catch (error) {
     saveCloudSyncConfig(null);
-    cloudSyncStatus = error?.message === "invalid phone" ? "手机号格式不正确" : "开启失败：请检查 PIN、Worker 地址或网络";
+    cloudSyncStatus = error?.message === "invalid phone"
+      ? "手机号格式不正确"
+      : (cloudSyncStatus || "开启失败：请检查 PIN、Worker 地址或网络");
     showToast(cloudSyncStatus);
   } finally {
     cloudSyncBusy = false;
