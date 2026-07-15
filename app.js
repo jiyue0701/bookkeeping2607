@@ -65,6 +65,7 @@ const ui = {
 let records = [];
 let toastTimer = null;
 let trendPointerHandledAt = 0;
+let trendDragActive = false;
 let autoBackupTimer = null;
 let midnightBackupTimer = null;
 let cloudBackupTimer = null;
@@ -1266,7 +1267,8 @@ function renderTrend(monthRecords) {
     const index = points.indexOf(selectedPoint);
     const x1 = index === 0 ? chart.left : selectedPoint.x - stepX / 2;
     const x2 = index === points.length - 1 ? chart.width - chart.right : selectedPoint.x + stepX / 2;
-    return `<rect class="trend-selected-band" x="${x1.toFixed(1)}" y="${chart.top}" width="${(x2 - x1).toFixed(1)}" height="${plotHeight.toFixed(1)}" rx="2"></rect>`;
+    const bandTop = chart.top - 8;
+    return `<rect class="trend-selected-band" x="${x1.toFixed(1)}" y="${bandTop}" width="${(x2 - x1).toFixed(1)}" height="${(baseY - bandTop).toFixed(1)}" rx="2"></rect>`;
   })() : "";
   const peak = selectedPoint || points.reduce((best, point) => point.amountCents > best.amountCents ? point : best, points[0]);
   const tooltipWidth = 112;
@@ -1283,7 +1285,7 @@ function renderTrend(monthRecords) {
   const average = Math.round(total / activeDays);
   const lineChart = `
     <div class="trend-chart-shell">
-      <svg class="trend-chart" viewBox="0 0 ${chart.width} ${chart.height}" width="${chart.width}" height="${chart.height}" role="img" aria-label="本月支出趋势折线图">
+      <svg class="trend-chart" viewBox="0 0 ${chart.width} ${chart.height}" width="${chart.width}" height="${chart.height}" data-days="${daily.length}" data-chart-left="${chart.left}" data-chart-right="${chart.width - chart.right}" data-view-width="${chart.width}" role="img" aria-label="本月支出趋势折线图">
         <defs>
           <linearGradient id="trendAreaGradient" x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stop-color="#ff6d82" stop-opacity=".20"></stop>
@@ -1526,18 +1528,54 @@ function showToast(message) {
 }
 
 function activateTrendDay(actionElement) {
-  ui.trendSelectedDate = actionElement.dataset.date;
-  if (typeof navigator.vibrate === "function") navigator.vibrate(12);
+  activateTrendDayData(actionElement.dataset.date, Number(actionElement.dataset.amount || 0), true);
+}
+
+function activateTrendDayData(date, amountCents, toast = false) {
+  if (!date || ui.trendSelectedDate === date && !toast) return;
+  ui.trendSelectedDate = date;
   render();
-  showToast(`${dayLabel(dateFromKey(actionElement.dataset.date))}：${formatMoney(Number(actionElement.dataset.amount || 0))}`);
+  if (toast) showToast(`${dayLabel(dateFromKey(date))}：${formatMoney(amountCents)}`);
+}
+
+function trendDataFromPointer(event) {
+  const chartElement = event.target.closest?.(".trend-chart") || document.querySelector(".trend-chart");
+  if (!chartElement) return null;
+  const rect = chartElement.getBoundingClientRect();
+  if (!rect.width || event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) return null;
+  const days = Number(chartElement.dataset.days || 0);
+  const left = Number(chartElement.dataset.chartLeft || 0);
+  const right = Number(chartElement.dataset.chartRight || chartElement.dataset.viewWidth || 0);
+  const viewWidth = Number(chartElement.dataset.viewWidth || 1);
+  if (!days || right <= left) return null;
+  const viewX = ((event.clientX - rect.left) / rect.width) * viewWidth;
+  const ratio = Math.min(1, Math.max(0, (viewX - left) / (right - left)));
+  const index = Math.min(days - 1, Math.max(0, Math.round(ratio * (days - 1))));
+  const date = new Date(ui.monthCursor.getFullYear(), ui.monthCursor.getMonth(), index + 1);
+  const amountCents = dailyExpenses(ui.monthCursor)[index]?.amountCents || 0;
+  return { date: dateKey(date), amountCents };
 }
 
 function handleTrendPointer(event) {
-  const actionElement = event.target.closest?.(".trend-day-zone, .trend-point-hit");
-  if (!actionElement) return;
+  const data = trendDataFromPointer(event);
+  if (!data) return;
+  event.preventDefault();
+  trendDragActive = true;
+  trendPointerHandledAt = Date.now();
+  activateTrendDayData(data.date, data.amountCents);
+}
+
+function handleTrendPointerMove(event) {
+  if (!trendDragActive) return;
+  const data = trendDataFromPointer(event);
+  if (!data) return;
   event.preventDefault();
   trendPointerHandledAt = Date.now();
-  activateTrendDay(actionElement);
+  activateTrendDayData(data.date, data.amountCents);
+}
+
+function stopTrendPointer() {
+  trendDragActive = false;
 }
 
 function deleteRecord(id) {
@@ -1687,6 +1725,9 @@ function init() {
   });
   document.addEventListener("click", handleClick);
   document.addEventListener("pointerdown", handleTrendPointer, { passive: false });
+  document.addEventListener("pointermove", handleTrendPointerMove, { passive: false });
+  document.addEventListener("pointerup", stopTrendPointer);
+  document.addEventListener("pointercancel", stopTrendPointer);
   document.addEventListener("input", handleInput);
   document.addEventListener("change", handleBackupInput);
   document.addEventListener("submit", (event) => {

@@ -356,13 +356,13 @@ h3 { font-size: 16px; }
 .stats-card { padding-bottom: 15px; }
 .chart-wrap { margin-top: 10px; overflow: hidden; padding: 9px 0 2px; }
 .trend-chart-shell { width: 100%; padding: 0 0 12px; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: rgba(255, 255, 255, .74); }
-.trend-chart { display: block; width: 100%; height: auto; aspect-ratio: 12 / 7; touch-action: manipulation; }
+.trend-chart { display: block; width: 100%; height: auto; aspect-ratio: 12 / 7; touch-action: pan-y; }
 .trend-grid-line { stroke: #eef2ef; stroke-width: 1; }
 .trend-axis { stroke: #bfc8c4; stroke-dasharray: 5 6; stroke-width: 1.2; }
 .trend-axis-label { fill: var(--muted); font-size: 11px; font-weight: 700; }
 .trend-area { fill: url(#trendAreaGradient); }
 .trend-line { fill: none; stroke: var(--coral); stroke-linecap: round; stroke-linejoin: round; stroke-width: 2.8; }
-.trend-selected-band { fill: rgba(255, 109, 130, .09); }
+.trend-selected-band { fill: rgba(255, 109, 130, .12); }
 .trend-day-zone { fill: rgba(255, 109, 130, .001); cursor: pointer; pointer-events: all; }
 .trend-day-zone:active { fill: rgba(255, 109, 130, .08); }
 .trend-hit-area { fill: transparent; cursor: pointer; }

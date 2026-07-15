@@ -1,4 +1,4 @@
-const CACHE_NAME = "bookkeeping2607-pwa-v19";
+const CACHE_NAME = "bookkeeping2607-pwa-v20";
 const APP_SHELL = [
   "./",
   "./index.html",
