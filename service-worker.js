@@ -1,4 +1,4 @@
-const CACHE_NAME = "bookkeeping2607-pwa-v11";
+const CACHE_NAME = "bookkeeping2607-pwa-v12";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -7,6 +7,20 @@ const APP_SHELL = [
   "./manifest.webmanifest",
   "./assets/black-shiba-mascot.png"
 ];
+
+function shouldPreferNetwork(request) {
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return false;
+  if (request.mode === "navigate") return true;
+  return [
+    "/",
+    "/index.html",
+    "/styles.css",
+    "/app.js",
+    "/manifest.webmanifest",
+    "/service-worker.js"
+  ].some((path) => url.pathname.endsWith(path));
+}
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -28,6 +42,19 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+
+  if (shouldPreferNetwork(event.request)) {
+    event.respondWith(
+      fetch(event.request).then((response) => {
+        if (response.ok && new URL(event.request.url).origin === self.location.origin) {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        }
+        return response;
+      }).catch(() => caches.match(event.request))
+    );
+    return;
+  }
 
   event.respondWith(
     caches.match(event.request).then((cached) => {
