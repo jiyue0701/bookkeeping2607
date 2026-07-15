@@ -40,6 +40,7 @@ body {
 
 button, input, select, textarea { font: inherit; }
 button { -webkit-tap-highlight-color: transparent; }
+button:disabled { cursor: not-allowed; opacity: .58; }
 
 .app-shell {
   width: min(100%, 760px);
@@ -448,8 +449,14 @@ h3 { font-size: 16px; }
 .settings-line small { color: var(--muted); font-size: 11px; font-weight: 700; }
 .backup-note { line-height: 1.6; }
 .backup-auto-note { margin-top: 10px; color: var(--mint-deep); font-size: 12px; font-weight: 800; line-height: 1.5; }
+.backup-manual-note { margin-top: 8px; color: #536e70; font-size: 12px; font-weight: 800; line-height: 1.5; }
+.merge-steps { display: grid; gap: 8px; margin-top: 12px; }
+.merge-steps div { display: flex; align-items: flex-start; gap: 9px; padding: 10px; border-radius: 14px; background: rgba(216, 245, 239, .58); color: #536e70; font-size: 12px; font-weight: 800; line-height: 1.45; }
+.merge-steps strong { display: grid; flex: 0 0 auto; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--mint); color: white; font-size: 11px; }
 .backup-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-top: 13px; }
 .backup-card .modal-actions { margin-top: 12px; }
+.cloud-card .action-button { margin-top: 13px; }
+.cloud-form { display: grid; gap: 10px; margin: 13px 0 0; }
 .category-summary { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 .category-summary-item { display: flex; align-items: center; gap: 8px; padding: 10px; border-radius: 15px; background: rgba(216, 245, 239, .55); font-size: 12px; font-weight: 800; }
 .category-summary-item .category-icon { width: 34px; height: 34px; border-radius: 12px; font-size: 18px; }

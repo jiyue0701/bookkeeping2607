@@ -1,0 +1,16 @@
+name = "migao-bookkeeping-cloud"
+main = "worker.js"
+compatibility_date = "2026-07-15"
+
+# 建议部署后把这个值改成你的 GitHub Pages 网址，例如：
+# CORS_ORIGIN = "https://jiyue0701.github.io"
+# 如果还没确定网址，可以先不设置，Worker 会允许任意来源调用。
+[vars]
+CORS_ORIGIN = "*"
+
+# 先运行 wrangler kv namespace create MIGAO_BACKUPS，
+# 再把返回的 id 填到下面。
+[[kv_namespaces]]
+binding = "MIGAO_BACKUPS"
+id = "replace-with-your-kv-namespace-id"
+

@@ -3,6 +3,8 @@ Thumbs.db
 node_modules/
 .env
 .env.*
+cloudflare/.wrangler/
+cloudflare/wrangler.toml
 
 # 本项目账单保存在浏览器 localStorage，不应作为文件上传
 *.db

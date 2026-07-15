@@ -6,6 +6,11 @@ const BACKUP_FORMAT = "migao-bookkeeping-backup";
 const BACKUP_VERSION = 1;
 const AUTO_BACKUP_DB = "migao-bookkeeping-local-backup";
 const AUTO_BACKUP_STORE = "snapshots";
+const EXPORT_HISTORY_KEY = "bookkeeping2607.pwa.lastExportAt";
+const CLOUD_SYNC_CONFIG_KEY = "bookkeeping2607.pwa.cloudSync";
+const CLOUD_SYNC_FORMAT = "migao-cloud-backup-encrypted";
+const CLOUD_SYNC_VERSION = 1;
+const CLOUD_SYNC_DEFAULT_ENDPOINT = "https://migao-bookkeeping-cloud.migao-bookkeeping.workers.dev";
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
 
 const TYPE_META = {
@@ -60,6 +65,17 @@ let records = [];
 let toastTimer = null;
 let autoBackupTimer = null;
 let midnightBackupTimer = null;
+let cloudBackupTimer = null;
+let autoBackupStatus = {
+  supported: typeof window !== "undefined" && !!window.indexedDB,
+  available: false,
+  savedAt: null,
+  recordCount: 0
+};
+let lastManualBackupAt = loadLastManualBackupAt();
+let cloudSyncConfig = loadCloudSyncConfig();
+let cloudSyncStatus = "";
+let cloudSyncBusy = false;
 records = loadRecords();
 
 function categoryObjects(type) {
@@ -126,6 +142,55 @@ function loadRecords() {
   }
 }
 
+function loadLastManualBackupAt() {
+  try {
+    return localStorage.getItem(EXPORT_HISTORY_KEY) || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function loadCloudSyncConfig() {
+  try {
+    const value = JSON.parse(localStorage.getItem(CLOUD_SYNC_CONFIG_KEY) || "null");
+    if (!value?.enabled || !value?.endpoint || !value?.accountId || !value?.authHash || !value?.encryptionKey) return null;
+    return {
+      enabled: true,
+      endpoint: String(value.endpoint),
+      accountLabel: String(value.accountLabel || "已绑定账号"),
+      accountId: String(value.accountId),
+      authHash: String(value.authHash),
+      encryptionKey: String(value.encryptionKey),
+      lastUploadedAt: value.lastUploadedAt || null,
+      lastRestoredAt: value.lastRestoredAt || null
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function saveCloudSyncConfig(config) {
+  cloudSyncConfig = config;
+  try {
+    if (config) {
+      localStorage.setItem(CLOUD_SYNC_CONFIG_KEY, JSON.stringify(config));
+    } else {
+      localStorage.removeItem(CLOUD_SYNC_CONFIG_KEY);
+    }
+  } catch (_) {
+    showToast("云备份配置保存失败，请检查本机存储空间");
+  }
+}
+
+function markManualBackupPrepared() {
+  lastManualBackupAt = new Date().toISOString();
+  try {
+    localStorage.setItem(EXPORT_HISTORY_KEY, lastManualBackupAt);
+  } catch (_) {
+    // This timestamp is only a reminder; failing to save it must not block backup export.
+  }
+}
+
 function persistRecords() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
@@ -133,11 +198,283 @@ function persistRecords() {
       records
     }));
     scheduleAutoBackup();
+    scheduleCloudBackup();
     return true;
   } catch (_) {
     showToast("本机存储空间不足，请不要清除当前网页数据");
     return false;
   }
+}
+
+function bytesToBase64(bytes) {
+  let value = "";
+  bytes.forEach((byte) => {
+    value += String.fromCharCode(byte);
+  });
+  return btoa(value);
+}
+
+function base64ToBytes(value) {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+function bytesToHex(bytes) {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function textBytes(value) {
+  return new TextEncoder().encode(String(value));
+}
+
+async function sha256Hex(value) {
+  const digest = await crypto.subtle.digest("SHA-256", textBytes(value));
+  return bytesToHex(new Uint8Array(digest));
+}
+
+function normalizePhone(value) {
+  const text = String(value || "").trim();
+  const leadingPlus = text.startsWith("+") ? "+" : "";
+  return `${leadingPlus}${text.replace(/[^\d]/g, "")}`;
+}
+
+function maskPhone(value) {
+  const text = String(value || "");
+  if (text.length <= 7) return text;
+  return `${text.slice(0, 3)}****${text.slice(-4)}`;
+}
+
+function normalizeEndpoint(value) {
+  return String(value || "").trim().replace(/\/+$/, "");
+}
+
+async function deriveCloudIdentity(phone, pin) {
+  if (!crypto.subtle) throw new Error("web crypto unavailable");
+  const normalizedPhone = normalizePhone(phone);
+  const normalizedPin = String(pin || "").trim();
+  if (!/^\+?\d{6,20}$/.test(normalizedPhone)) throw new Error("invalid phone");
+  if (normalizedPin.length < 4 || normalizedPin.length > 32) throw new Error("invalid pin");
+
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    textBytes(`${normalizedPhone}:${normalizedPin}`),
+    "PBKDF2",
+    false,
+    ["deriveBits"]
+  );
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt: textBytes("migao-cloud-sync-v1"),
+      iterations: 200000,
+      hash: "SHA-256"
+    },
+    keyMaterial,
+    512
+  );
+  const derived = new Uint8Array(bits);
+  const encryptionKey = bytesToBase64(derived.slice(0, 32));
+  const authSecret = bytesToBase64(derived.slice(32, 64));
+  const accountId = await sha256Hex(`migao-account:${normalizedPhone}:${normalizedPin}`);
+  const authHash = await sha256Hex(`migao-auth:${accountId}:${authSecret}`);
+
+  return {
+    accountId,
+    authHash,
+    encryptionKey,
+    accountLabel: maskPhone(normalizedPhone)
+  };
+}
+
+async function importAesKey(base64Key) {
+  return crypto.subtle.importKey(
+    "raw",
+    base64ToBytes(base64Key),
+    { name: "AES-GCM" },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+async function encryptCloudPayload(payload, base64Key) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await importAesKey(base64Key);
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    textBytes(JSON.stringify(payload))
+  );
+  return {
+    format: CLOUD_SYNC_FORMAT,
+    version: CLOUD_SYNC_VERSION,
+    alg: "AES-GCM",
+    kdf: "PBKDF2-SHA256",
+    iv: bytesToBase64(iv),
+    ciphertext: bytesToBase64(new Uint8Array(ciphertext))
+  };
+}
+
+async function decryptCloudPayload(encryptedPayload, base64Key) {
+  if (encryptedPayload?.format !== CLOUD_SYNC_FORMAT) throw new Error("cloud format mismatch");
+  const key = await importAesKey(base64Key);
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: base64ToBytes(encryptedPayload.iv) },
+    key,
+    base64ToBytes(encryptedPayload.ciphertext)
+  );
+  return JSON.parse(new TextDecoder().decode(plaintext));
+}
+
+async function cloudRequest(path, options = {}) {
+  if (!cloudSyncConfig?.endpoint) throw new Error("cloud sync disabled");
+  const response = await fetch(`${cloudSyncConfig.endpoint}${path}`, {
+    ...options,
+    headers: {
+      "content-type": "application/json",
+      ...(options.headers || {})
+    }
+  });
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    const message = data?.error || `cloud request failed: ${response.status}`;
+    throw new Error(message);
+  }
+  return data;
+}
+
+function cloudSyncText() {
+  if (cloudSyncStatus) return cloudSyncStatus;
+  if (!cloudSyncConfig) return "未开启。使用手机号作为账号，再设置同步密码/PIN；云端只保存加密后的备份。";
+  const last = cloudSyncConfig.lastUploadedAt ? `上次云备份：${backupTimeLabel(cloudSyncConfig.lastUploadedAt)}` : "还没有上传过云备份";
+  return `${cloudSyncConfig.accountLabel} 已开启。${last}`;
+}
+
+function scheduleCloudBackup() {
+  if (!cloudSyncConfig?.enabled) return;
+  if (cloudBackupTimer) window.clearTimeout(cloudBackupTimer);
+  cloudBackupTimer = window.setTimeout(() => {
+    cloudBackupTimer = null;
+    uploadCloudBackup(false);
+  }, 3000);
+}
+
+async function uploadCloudBackup(manual = true) {
+  if (!cloudSyncConfig?.enabled || cloudSyncBusy) return false;
+  cloudSyncBusy = true;
+  if (manual) {
+    cloudSyncStatus = "正在上传云备份...";
+    render();
+  }
+  try {
+    const encryptedPayload = await encryptCloudPayload(buildBackupPayload(), cloudSyncConfig.encryptionKey);
+    const data = await cloudRequest("/api/backup", {
+      method: "POST",
+      body: JSON.stringify({
+        accountId: cloudSyncConfig.accountId,
+        authHash: cloudSyncConfig.authHash,
+        encryptedPayload,
+        recordCount: records.length,
+        clientUpdatedAt: new Date().toISOString()
+      })
+    });
+    saveCloudSyncConfig({
+      ...cloudSyncConfig,
+      lastUploadedAt: data?.updatedAt || new Date().toISOString()
+    });
+    cloudSyncStatus = manual ? "云备份已上传" : "";
+    if (manual) showToast("云备份已上传");
+    return true;
+  } catch (_) {
+    cloudSyncStatus = "云备份失败：请检查 Worker 地址或网络";
+    if (manual) showToast("云备份失败，请稍后重试");
+    return false;
+  } finally {
+    cloudSyncBusy = false;
+    if (ui.tab === "settings") render();
+  }
+}
+
+async function restoreCloudBackup() {
+  if (!cloudSyncConfig?.enabled || cloudSyncBusy) return;
+  cloudSyncBusy = true;
+  cloudSyncStatus = "正在读取云备份...";
+  render();
+  try {
+    const data = await cloudRequest(`/api/backup?account=${encodeURIComponent(cloudSyncConfig.accountId)}`, {
+      method: "GET",
+      headers: { "x-migao-auth": cloudSyncConfig.authHash }
+    });
+    const payload = await decryptCloudPayload(data.encryptedPayload, cloudSyncConfig.encryptionKey);
+    const incoming = (payload?.records || []).map(normalizeRecord).filter((record) => record.amountCents > 0);
+    const previousRecords = records;
+    const result = mergeRecords(records, incoming);
+    records = result.records;
+    if (!persistRecords()) {
+      records = previousRecords;
+      render();
+      return;
+    }
+    saveCloudSyncConfig({
+      ...cloudSyncConfig,
+      lastRestoredAt: new Date().toISOString()
+    });
+    cloudSyncStatus = `已从云端合并 ${result.imported} 笔，新增 ${result.added} 笔`;
+    showToast(cloudSyncStatus);
+  } catch (error) {
+    cloudSyncStatus = error?.message === "not found" ? "云端还没有备份" : "读取云备份失败：请检查账号、PIN 或网络";
+    showToast(cloudSyncStatus);
+  } finally {
+    cloudSyncBusy = false;
+    render();
+  }
+}
+
+async function enableCloudSync() {
+  if (cloudSyncBusy) return;
+  const endpoint = normalizeEndpoint(document.querySelector("[data-cloud-field='endpoint']")?.value);
+  const phone = document.querySelector("[data-cloud-field='phone']")?.value;
+  const pin = document.querySelector("[data-cloud-field='pin']")?.value;
+  if (!endpoint || !/^https?:\/\//.test(endpoint)) {
+    showToast("请输入 Cloudflare Worker 地址");
+    return;
+  }
+
+  cloudSyncBusy = true;
+  cloudSyncStatus = "正在开启云备份...";
+  render();
+  try {
+    const identity = await deriveCloudIdentity(phone, pin);
+    saveCloudSyncConfig({
+      enabled: true,
+      endpoint,
+      accountLabel: identity.accountLabel,
+      accountId: identity.accountId,
+      authHash: identity.authHash,
+      encryptionKey: identity.encryptionKey,
+      lastUploadedAt: null,
+      lastRestoredAt: null
+    });
+    cloudSyncBusy = false;
+    const uploaded = await uploadCloudBackup(false);
+    if (!uploaded) throw new Error("upload failed");
+    cloudSyncStatus = "云备份已开启，并已上传当前账单";
+    showToast("云备份已开启");
+  } catch (error) {
+    saveCloudSyncConfig(null);
+    cloudSyncStatus = error?.message === "invalid phone" ? "手机号格式不正确" : "开启失败：请检查 PIN、Worker 地址或网络";
+    showToast(cloudSyncStatus);
+  } finally {
+    cloudSyncBusy = false;
+    render();
+  }
+}
+
+function disableCloudSync() {
+  saveCloudSyncConfig(null);
+  cloudSyncStatus = "已关闭本机云备份配置；云端旧备份不会自动删除。";
+  render();
+  showToast("已关闭云备份");
 }
 
 function backupFileStamp(date = new Date()) {
@@ -187,6 +524,8 @@ async function exportData() {
           text: `${records.length} 笔账单备份文件`,
           files: [file]
         });
+        markManualBackupPrepared();
+        if (ui.tab === "settings") render();
         showToast("备份已准备好，请保存到“文件”或 iCloud 云盘");
         return;
       }
@@ -196,6 +535,8 @@ async function exportData() {
   }
 
   downloadBlob(blob, filename);
+  markManualBackupPrepared();
+  if (ui.tab === "settings") render();
   showToast("备份文件已生成，请保存到“文件”或 iCloud 云盘");
 }
 
@@ -271,9 +612,41 @@ function openAutoBackupDB() {
   });
 }
 
+function updateAutoBackupStatus(snapshot) {
+  autoBackupStatus = {
+    supported: true,
+    available: !!snapshot,
+    savedAt: snapshot?.savedAt || null,
+    recordCount: Number(snapshot?.recordCount ?? snapshot?.records?.length ?? 0)
+  };
+}
+
+function backupTimeLabel(isoString) {
+  if (!isoString) return "暂无记录";
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return "暂无记录";
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function manualBackupText() {
+  if (!records.length) return "还没有账单，开始使用后建议定期导出 JSON 备份。";
+  if (!lastManualBackupAt) return "还没有生成过 JSON 备份；长期使用前，建议先导出一份保存到“文件”或 iCloud 云盘。";
+  return `上次生成 JSON 备份：${backupTimeLabel(lastManualBackupAt)}。长期使用时，建议每次大版本更新或每周手动导出一次。`;
+}
+
+function autoBackupText() {
+  if (!autoBackupStatus.supported) return "本机自动快照：当前浏览器不支持 IndexedDB，请依赖 JSON 导出备份。";
+  if (!autoBackupStatus.available) return "本机自动快照：已开启；打开或保存账单后会写入最近快照。";
+  return `本机自动快照：最近 ${backupTimeLabel(autoBackupStatus.savedAt)}，含 ${autoBackupStatus.recordCount} 笔。`;
+}
+
 async function saveAutoBackup() {
   const db = await openAutoBackupDB();
-  if (!db) return;
+  if (!db) {
+    autoBackupStatus = { supported: false, available: false, savedAt: null, recordCount: 0 };
+    if (ui.tab === "settings") render();
+    return;
+  }
 
   const now = new Date();
   const payload = buildBackupPayload();
@@ -298,8 +671,35 @@ async function saveAutoBackup() {
         .filter((key) => typeof key === "string" && key.startsWith("day-") && key < cutoffId)
         .forEach((key) => store.delete(key));
     };
-    transaction.oncomplete = () => db.close();
+    transaction.oncomplete = () => {
+      updateAutoBackupStatus(snapshot);
+      db.close();
+      if (ui.tab === "settings") render();
+    };
     transaction.onerror = () => db.close();
+  } catch (_) {
+    db.close();
+  }
+}
+
+async function loadAutoBackupStatus() {
+  const db = await openAutoBackupDB();
+  if (!db) {
+    autoBackupStatus = { supported: false, available: false, savedAt: null, recordCount: 0 };
+    if (ui.tab === "settings") render();
+    return;
+  }
+
+  try {
+    const snapshot = await new Promise((resolve) => {
+      const transaction = db.transaction(AUTO_BACKUP_STORE, "readonly");
+      const request = transaction.objectStore(AUTO_BACKUP_STORE).get("latest");
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => resolve(null);
+    });
+    db.close();
+    updateAutoBackupStatus(snapshot);
+    if (ui.tab === "settings") render();
   } catch (_) {
     db.close();
   }
@@ -534,24 +934,6 @@ function openQuickEntryFromURL() {
   return true;
 }
 
-function quickEntryURL() {
-  const url = new URL(window.location.href);
-  ["quick", "type", "category", "note", "account"].forEach((key) => url.searchParams.delete(key));
-  url.searchParams.set("quick", "1");
-  return url.toString();
-}
-
-async function copyQuickEntryURL() {
-  const value = quickEntryURL();
-  try {
-    if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") throw new Error("clipboard unavailable");
-    await navigator.clipboard.writeText(value);
-    showToast("已复制快速记账网址");
-  } catch (_) {
-    window.prompt("请复制这个快速记账网址", value);
-  }
-}
-
 function createRecord(draft, amountCents, category) {
   const now = new Date().toISOString();
   return normalizeRecord({
@@ -650,7 +1032,7 @@ function renderHome() {
 
       <section class="paper-card migao-reminder-card">
         <div class="section-heading"><div><h2>米糕提醒</h2><div class="subtle">账单只保存在这台设备的浏览器里</div></div><span class="reminder-mark" aria-hidden="true">🐕</span></div>
-        <p class="subtle reminder-copy">不要使用无痕模式，也不要清除 Safari 的网站数据。以后更新功能时，会继续保留这台设备里的账单。</p>
+        <p class="subtle reminder-copy">长期使用请固定从主屏幕 Web App 打开，并定期在“我的 → 数据管理”导出 JSON 备份。网页更新不会清空账单，但清除网站数据或换设备会丢失本机数据。</p>
       </section>
 
       <section class="paper-card home-help-card">
@@ -823,7 +1205,7 @@ function renderSettings() {
   const preview = categoriesFor("expense").slice(0, 8);
   return `
     <div class="page">
-      <div class="page-title-row"><div><span class="eyebrow">本地 · 米糕</span><h1>我的</h1></div><span class="small-chip">v1.0</span></div>
+      <div class="page-title-row"><div><span class="eyebrow">本地 · 米糕</span><h1>我的</h1></div><span class="small-chip">v1.1</span></div>
       <section class="paper-card">
         <div class="settings-brand"><img class="mascot small" src="./assets/black-shiba-mascot.png" alt="米糕黑柴"><div class="settings-brand-copy"><strong>米糕记账</strong><span>记录每一个值得记住的日常</span></div></div>
       </section>
@@ -837,13 +1219,19 @@ function renderSettings() {
           <div class="settings-line"><span class="line-icon">▣</span><span>账单保存在本机浏览器</span><small>${records.length} 笔</small></div>
           <div class="settings-line"><span class="line-icon">¥</span><span>人民币元，固定两位小数</span></div>
           <div class="settings-line"><span class="line-icon">⌁</span><span>网页更新不改变本地数据</span></div>
-          <div class="settings-line"><span class="line-icon">↻</span><span>本机自动快照，打开或保存后更新</span></div>
+          <div class="settings-line"><span class="line-icon">↻</span><span>${autoBackupText()}</span></div>
         </div>
       </section>
       <section class="paper-card backup-card">
-        <div class="section-heading"><div><h2>数据管理</h2><div class="subtle">换手机或清理缓存前，先保存一份备份</div></div><span class="small-chip">${records.length} 笔</span></div>
-        <div class="subtle backup-note">账单默认只保存在这台设备。网页更新不会清掉它，但换手机、删除网站数据或清理浏览器缓存可能会导致本机账单消失。导入会和当前账单合并，不会直接覆盖。</div>
-        <div class="backup-auto-note">↻ 本机自动快照：打开或保存后自动更新；应用保持打开时会在跨日后再次更新。</div>
+        <div class="section-heading"><div><h2>数据管理</h2><div class="subtle">合并、导出、恢复都从这里做</div></div><span class="small-chip">${records.length} 笔</span></div>
+        <div class="subtle backup-note">主屏幕独立 Web App 和 Safari 可能是两套本地账单。网页不能直接跨读取另一套存储；需要先在有旧账单的入口导出 JSON，再到长期使用的主屏幕 Web App 里导入。导入会合并当前账单，不会直接覆盖。</div>
+        <div class="merge-steps">
+          <div><strong>1</strong><span>在 Safari 那套账单里导出 JSON 备份</span></div>
+          <div><strong>2</strong><span>回到主屏幕 Web App，点“导入 JSON 备份”</span></div>
+          <div><strong>3</strong><span>新增记录会加入，重复记录只在备份更新时替换</span></div>
+        </div>
+        <div class="backup-auto-note">↻ ${autoBackupText()}</div>
+        <div class="backup-manual-note">${manualBackupText()}</div>
         <div class="backup-actions">
           <button class="action-button secondary" type="button" data-action="export-data">导出 JSON 备份</button>
           <button class="action-button secondary" type="button" data-action="import-data">导入 JSON 备份</button>
@@ -851,12 +1239,32 @@ function renderSettings() {
         </div>
         <div class="modal-actions">
           <button class="action-button secondary" type="button" data-action="demo-data">加入演示账单</button>
-          <button class="action-button danger" type="button" data-action="clear-data">清空本机全部账单</button>
         </div>
       </section>
+      <section class="paper-card cloud-card">
+        <div class="section-heading"><div><h2>云备份</h2><div class="subtle">手机号作为账号，同步密码/PIN 负责加密</div></div><span class="small-chip">可选</span></div>
+        <div class="subtle backup-note">云备份用于换手机、重装或合并多入口账单。账单上传前会在本机加密，云端只保存密文；请记住手机号和同步密码，忘记密码无法解密云端备份。</div>
+        <div class="backup-auto-note">☁ ${cloudSyncText()}</div>
+        ${cloudSyncConfig ? `
+          <div class="backup-actions">
+            <button class="action-button secondary" type="button" data-action="cloud-upload" ${cloudSyncBusy ? "disabled" : ""}>立即上传云备份</button>
+            <button class="action-button secondary" type="button" data-action="cloud-restore" ${cloudSyncBusy ? "disabled" : ""}>从云端恢复合并</button>
+          </div>
+          <div class="modal-actions">
+            <button class="action-button secondary" type="button" data-action="cloud-disable" ${cloudSyncBusy ? "disabled" : ""}>关闭本机云备份配置</button>
+          </div>
+        ` : `
+          <div class="cloud-form">
+            <div class="field"><label for="cloud-endpoint">Worker 地址</label><input id="cloud-endpoint" data-cloud-field="endpoint" inputmode="url" value="${CLOUD_SYNC_DEFAULT_ENDPOINT}" placeholder="https://你的-worker.workers.dev"></div>
+            <div class="field"><label for="cloud-phone">手机号账号</label><input id="cloud-phone" data-cloud-field="phone" inputmode="tel" autocomplete="tel" placeholder="例如：13800138000"></div>
+            <div class="field"><label for="cloud-pin">同步密码 / PIN</label><input id="cloud-pin" data-cloud-field="pin" type="password" autocomplete="new-password" placeholder="至少 4 位，务必记住"></div>
+          </div>
+          <button class="action-button" type="button" data-action="cloud-enable" ${cloudSyncBusy ? "disabled" : ""}>开启云备份并上传当前账单</button>
+        `}
+      </section>
       <section class="paper-card">
-        <div class="section-heading"><div><h2>米糕的话</h2><div class="subtle">网页版不需要上架或开发者年费</div></div><span>🐕</span></div>
-        <div class="subtle" style="line-height:1.65;">用 Safari 打开网址，再添加到主屏幕。之后就像打开一个小 App 一样使用。</div>
+        <div class="section-heading"><div><h2>主屏幕入口</h2><div class="subtle">长期使用固定从 Web App 打开</div></div><span>🐕</span></div>
+        <div class="subtle" style="line-height:1.65;">用 Safari 第一次打开网址并添加到主屏幕；之后日常记账、查看和导入备份都从主屏幕图标进入。不要把 Safari 地址栏里的页面当成另一个日常账本。</div>
       </section>
     </div>`;
 }
@@ -910,10 +1318,9 @@ function renderHelpModal() {
            <p>数据保存在本机浏览器里。换手机或清除网站数据前，请到“我的 → 数据管理”导出 JSON 备份；在新设备打开后，再用“导入 JSON 备份”恢复。</p>
           <section class="quick-help-card">
             <h3>双击辅助触控，快速记一笔</h3>
-            <p>发布完成后，复制专用网址，在 iPhone「快捷指令」中新建一个“打开 URL”快捷指令并命名。然后到“设置 → 辅助功能 → 触控 → 辅助触控 → 双击”里选择它（不同 iOS 版本的菜单名称可能略有不同）。</p>
-            <p>这个入口会直接打开“快速记一笔”页面，输入金额后保存；如果双击动作列表没有直接显示快捷指令，可把快捷指令加入辅助触控顶层菜单，或改用“背部轻点”。</p>
-            <p><strong>数据提醒：</strong>主屏幕独立 Web App 和 Safari 可能是两套本地账单。当前没有自动云同步，但支持手动导出与导入；要使用这个快捷入口，建议日常固定使用同一种入口。</p>
-            <button class="action-button secondary" type="button" data-action="copy-quick-url">复制快速记账网址</button>
+            <p>长期使用固定从主屏幕“米糕记账”图标打开。这个入口会使用独立 Web App 的本地账单，界面也没有 Safari 地址栏。</p>
+            <p>新版配置里已经加入“快速记账”Web App 快捷项；如果你的 iOS 在主屏幕长按图标时显示它，优先从这里打开快速记账。不要把快捷指令里的“打开 URL”作为日常入口，它通常会进入 Safari 的另一套账单空间。</p>
+            <p><strong>合并提醒：</strong>如果 Safari 里已经有旧账单，先在 Safari 那套导出 JSON，再回到主屏幕 Web App 的“我的 → 数据管理”导入合并。</p>
           </section>
          </div>
         <div class="modal-actions"><button class="action-button secondary" type="button" data-action="close-help">知道了</button></div>
@@ -997,24 +1404,6 @@ function deleteRecord(id) {
   showToast("已删除这笔记录");
 }
 
-function clearData() {
-  if (!records.length) {
-    showToast("当前没有账单");
-    return;
-  }
-  if (!window.confirm("确定清空这台设备上的全部账单吗？此操作不能撤销。")) return;
-  const previousRecords = records;
-  records = [];
-  if (!persistRecords()) {
-    records = previousRecords;
-    render();
-    return;
-  }
-  clearAutoBackup();
-  render();
-  showToast("本机账单已清空");
-}
-
 function saveDraft(event) {
   event.preventDefault();
   const draft = ui.draft;
@@ -1070,14 +1459,23 @@ function handleClick(event) {
       ui.helpModal = false;
       render();
       break;
-    case "copy-quick-url":
-      copyQuickEntryURL();
-      break;
     case "export-data":
       exportData();
       break;
     case "import-data":
       document.querySelector("[data-backup-input]")?.click();
+      break;
+    case "cloud-enable":
+      enableCloudSync();
+      break;
+    case "cloud-upload":
+      uploadCloudBackup(true);
+      break;
+    case "cloud-restore":
+      restoreCloudBackup();
+      break;
+    case "cloud-disable":
+      disableCloudSync();
       break;
     case "select-type":
       if (ui.draft) {
@@ -1120,9 +1518,6 @@ function handleClick(event) {
     case "demo-data":
       addDemoData();
       break;
-    case "clear-data":
-      clearData();
-      break;
     default:
       break;
   }
@@ -1163,6 +1558,7 @@ function init() {
     navigator.storage.persist().catch(() => {});
   }
   scheduleMidnightBackup();
+  loadAutoBackupStatus();
   restoreAutoBackupIfNeeded();
 }
 

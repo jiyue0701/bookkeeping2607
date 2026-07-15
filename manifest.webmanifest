@@ -1,6 +1,7 @@
 {
   "name": "米糕记账",
   "short_name": "米糕记账",
+  "id": "./",
   "lang": "zh-CN",
   "start_url": "./",
   "scope": "./",
@@ -15,6 +16,21 @@
       "sizes": "any",
       "type": "image/png",
       "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "快速记账",
+      "short_name": "记一笔",
+      "description": "直接打开米糕记账的快速记录界面",
+      "url": "./?quick=1",
+      "icons": [
+        {
+          "src": "./assets/black-shiba-mascot.png",
+          "sizes": "any",
+          "type": "image/png"
+        }
+      ]
     }
   ]
 }
