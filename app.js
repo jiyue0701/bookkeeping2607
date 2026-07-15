@@ -55,6 +55,7 @@ const ui = {
   statisticsMode: "trend",
   monthCursor: startOfMonth(new Date()),
   selectedDate: dateKey(new Date()),
+  trendSelectedDate: null,
   modal: false,
   helpModal: false,
   quickEntry: false,
@@ -1228,7 +1229,7 @@ function renderTrend(monthRecords) {
   const daily = dailyExpenses(ui.monthCursor);
   const max = Math.max(...daily.map((item) => item.amountCents), 1);
   const total = sumCents(monthRecords, "expense");
-  const chart = { width: 620, height: 220, left: 26, right: 20, top: 28, bottom: 42 };
+  const chart = { width: 360, height: 210, left: 8, right: 8, top: 54, bottom: 34 };
   const baseY = chart.height - chart.bottom;
   const plotHeight = baseY - chart.top;
   const spanX = chart.width - chart.left - chart.right;
@@ -1250,18 +1251,19 @@ function renderTrend(monthRecords) {
     .join("");
   const pointNodes = points.map((point) => `
     <g class="trend-point-hit" data-action="trend-day" data-date="${dateKey(point.date)}" data-amount="${point.amountCents}" role="button" aria-label="${dayLabel(point.date)} ${formatMoney(point.amountCents)}">
-      <circle class="trend-hit-area" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="11"></circle>
-      <circle class="trend-point ${point.amountCents ? "has-value" : ""}" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="${point.amountCents ? 4.5 : 3.5}"></circle>
+      <circle class="trend-hit-area" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="7"></circle>
+      <circle class="trend-point ${point.amountCents ? "has-value" : ""}" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="${point.amountCents ? 3.4 : 2.8}"></circle>
     </g>`).join("");
-  const peak = points.reduce((best, point) => point.amountCents > best.amountCents ? point : best, points[0]);
-  const tooltipWidth = 128;
+  const selectedPoint = points.find((point) => dateKey(point.date) === ui.trendSelectedDate);
+  const peak = selectedPoint || points.reduce((best, point) => point.amountCents > best.amountCents ? point : best, points[0]);
+  const tooltipWidth = 112;
   const tooltipX = Math.min(Math.max(peak.x - tooltipWidth / 2, 8), chart.width - tooltipWidth - 8);
   const tooltip = `
     <g class="trend-tooltip">
-      <rect x="${tooltipX.toFixed(1)}" y="6" width="${tooltipWidth}" height="48" rx="8"></rect>
-      <path d="M ${peak.x.toFixed(1)} 60 l -7 -8 h 14 Z"></path>
-      <text x="${(tooltipX + 16).toFixed(1)}" y="27">${pad(peak.date.getMonth() + 1)}.${pad(peak.date.getDate())}</text>
-      <text class="trend-tooltip-amount" x="${(tooltipX + 16).toFixed(1)}" y="46">${formatMoney(peak.amountCents)}</text>
+      <rect x="${tooltipX.toFixed(1)}" y="6" width="${tooltipWidth}" height="42" rx="8"></rect>
+      <path d="M ${peak.x.toFixed(1)} 54 l -6 -7 h 12 Z"></path>
+      <text x="${(tooltipX + 13).toFixed(1)}" y="24">${pad(peak.date.getMonth() + 1)}.${pad(peak.date.getDate())}</text>
+      <text class="trend-tooltip-amount" x="${(tooltipX + 13).toFixed(1)}" y="41">${formatMoney(peak.amountCents)}</text>
     </g>`;
   const expenseCount = monthRecords.filter((record) => record.type === "expense").length;
   const activeDays = daily.filter((item) => item.amountCents > 0).length || 1;
@@ -1289,7 +1291,7 @@ function renderTrend(monthRecords) {
   return `
     <section class="paper-card stats-card">
       <div class="section-heading"><div><h2>支出趋势</h2><div class="subtle">每天的支出金额</div></div><span class="expense-text" style="font-weight:900;">${formatMoney(total)}</span></div>
-      ${total ? `<div class="chart-wrap">${lineChart}</div><div class="chart-note">左右滑动查看整月 · 点击折线点可看当天金额</div>` : renderEmptyState("还没有支出趋势", "开始记账后，这里会慢慢长出曲线", "📊")}
+      ${total ? `<div class="chart-wrap">${lineChart}</div><div class="chart-note">整月完整展示 · 点击折线点可看当天金额</div>` : renderEmptyState("还没有支出趋势", "开始记账后，这里会慢慢长出曲线", "📊")}
     </section>`;
 }
 
@@ -1627,6 +1629,9 @@ function handleClick(event) {
       render();
       break;
     case "trend-day":
+      ui.trendSelectedDate = actionElement.dataset.date;
+      if (typeof navigator.vibrate === "function") navigator.vibrate(12);
+      render();
       showToast(`${dayLabel(dateFromKey(actionElement.dataset.date))}：${formatMoney(Number(actionElement.dataset.amount || 0))}`);
       break;
     case "delete-record":
