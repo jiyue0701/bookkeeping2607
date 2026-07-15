@@ -64,6 +64,7 @@ const ui = {
 
 let records = [];
 let toastTimer = null;
+let trendPointerHandledAt = 0;
 let autoBackupTimer = null;
 let midnightBackupTimer = null;
 let cloudBackupTimer = null;
@@ -1295,9 +1296,9 @@ function renderTrend(monthRecords) {
         <path class="trend-line" d="${linePath}"></path>
         ${pointNodes}
         ${tooltip}
-        ${dayZones}
         <line class="trend-axis" x1="${chart.left}" y1="${baseY}" x2="${chart.width - chart.right}" y2="${baseY}"></line>
         ${dayLabels}
+        ${dayZones}
       </svg>
       <div class="trend-summary">本月已产生 <strong>${expenseCount}</strong> 笔支出，活跃日均 <strong>${formatMoney(average)}</strong></div>
     </div>`;
@@ -1524,6 +1525,21 @@ function showToast(message) {
   toastTimer = window.setTimeout(() => element.classList.remove("show"), 2300);
 }
 
+function activateTrendDay(actionElement) {
+  ui.trendSelectedDate = actionElement.dataset.date;
+  if (typeof navigator.vibrate === "function") navigator.vibrate(12);
+  render();
+  showToast(`${dayLabel(dateFromKey(actionElement.dataset.date))}：${formatMoney(Number(actionElement.dataset.amount || 0))}`);
+}
+
+function handleTrendPointer(event) {
+  const actionElement = event.target.closest?.(".trend-day-zone, .trend-point-hit");
+  if (!actionElement) return;
+  event.preventDefault();
+  trendPointerHandledAt = Date.now();
+  activateTrendDay(actionElement);
+}
+
 function deleteRecord(id) {
   const record = records.find((item) => item.id === id);
   if (!record) return;
@@ -1643,10 +1659,7 @@ function handleClick(event) {
       render();
       break;
     case "trend-day":
-      ui.trendSelectedDate = actionElement.dataset.date;
-      if (typeof navigator.vibrate === "function") navigator.vibrate(12);
-      render();
-      showToast(`${dayLabel(dateFromKey(actionElement.dataset.date))}：${formatMoney(Number(actionElement.dataset.amount || 0))}`);
+      if (Date.now() - trendPointerHandledAt > 450) activateTrendDay(actionElement);
       break;
     case "delete-record":
       deleteRecord(actionElement.dataset.id);
@@ -1673,6 +1686,7 @@ function init() {
     document.addEventListener(eventName, (event) => event.preventDefault(), { passive: false });
   });
   document.addEventListener("click", handleClick);
+  document.addEventListener("pointerdown", handleTrendPointer, { passive: false });
   document.addEventListener("input", handleInput);
   document.addEventListener("change", handleBackupInput);
   document.addEventListener("submit", (event) => {
