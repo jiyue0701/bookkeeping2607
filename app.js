@@ -1451,31 +1451,35 @@ function renderAddModal() {
   const meta = TYPE_META[draft.type];
   return `
     <div class="modal-backdrop" data-action="close-modal">
-      <section class="modal-sheet" data-modal-sheet aria-label="记一笔">
+      <section class="modal-sheet add-modal-sheet ${ui.quickEntry ? "quick-entry-sheet" : ""}" data-modal-sheet aria-label="记一笔">
         <div class="modal-heading"><h2>${ui.quickEntry ? "快速记一笔" : "记一笔"}</h2><button class="close-button" type="button" data-action="close-modal" aria-label="关闭">×</button></div>
-        <form data-form="add-record">
-          <div class="type-pills">
-            ${Object.entries(TYPE_META).map(([type, value]) => `<button class="type-pill ${value.className} ${draft.type === type ? "active" : ""}" type="button" data-action="select-type" data-type="${type}">${value.title}</button>`).join("")}
-          </div>
-          <section class="paper-card amount-card form-card">
-            <div class="amount-label">金额（元）</div>
-            <div class="amount-entry"><em class="${meta.className}-text">¥</em><input data-draft-field="amountText" inputmode="decimal" autocomplete="off" placeholder="0.00" value="${escapeHtml(draft.amountText)}" aria-label="金额"></div>
-          </section>
-          <section class="paper-card form-card">
-            <div class="field"><label for="record-note">备注</label><textarea id="record-note" data-draft-field="note" placeholder="例如：午餐、打车上班">${escapeHtml(draft.note)}</textarea></div>
-          </section>
-          <section class="paper-card form-card">
-            <div class="section-heading"><div><h2>选择分类</h2><div class="subtle">基础分类 · 常用分类优先</div></div></div>
-            <div class="category-grid">${categories.map((category) => `<button class="category-button ${draft.categoryId === category.id ? "selected" : ""}" type="button" data-action="select-category" data-category="${category.id}"><span class="category-icon ${meta.className}">${category.icon}</span><span>${category.name}</span></button>`).join("")}</div>
-          </section>
-          <section class="paper-card form-card">
-            <div class="field-grid">
-              <div class="field"><label for="occurred-at">日期和时间</label><input id="occurred-at" type="datetime-local" data-draft-field="occurredAt" value="${escapeHtml(draft.occurredAt)}"></div>
-              <div class="field"><label for="account-name">${draft.type === "transfer" ? "转出账户" : "账户"}</label><input id="account-name" data-draft-field="accountName" value="${escapeHtml(draft.accountName)}" placeholder="例如：微信"></div>
-              ${draft.type === "transfer" ? `<div class="field"><label for="destination-account">转入账户</label><input id="destination-account" data-draft-field="destinationAccountName" value="${escapeHtml(draft.destinationAccountName)}" placeholder="例如：银行卡"></div>` : ""}
+        <form class="add-record-form" data-form="add-record">
+          <div class="add-form-scroll">
+            <div class="type-pills">
+              ${Object.entries(TYPE_META).map(([type, value]) => `<button class="type-pill ${value.className} ${draft.type === type ? "active" : ""}" type="button" data-action="select-type" data-type="${type}">${value.title}</button>`).join("")}
             </div>
-          </section>
-          <button class="action-button" type="submit">保存这笔记录</button>
+            <section class="paper-card amount-card form-card">
+              <div class="amount-label">金额（元）</div>
+              <div class="amount-entry"><em class="${meta.className}-text">¥</em><input data-draft-field="amountText" inputmode="decimal" autocomplete="off" placeholder="0.00" value="${escapeHtml(draft.amountText)}" aria-label="金额"></div>
+            </section>
+            <section class="paper-card form-card">
+              <div class="field"><label for="record-note">备注</label><textarea id="record-note" data-draft-field="note" placeholder="例如：午餐、打车上班">${escapeHtml(draft.note)}</textarea></div>
+            </section>
+            <section class="paper-card form-card">
+              <div class="section-heading"><div><h2>选择分类</h2><div class="subtle">基础分类 · 常用分类优先</div></div></div>
+              <div class="category-grid">${categories.map((category) => `<button class="category-button ${draft.categoryId === category.id ? "selected" : ""}" type="button" data-action="select-category" data-category="${category.id}"><span class="category-icon ${meta.className}">${category.icon}</span><span>${category.name}</span></button>`).join("")}</div>
+            </section>
+            <section class="paper-card form-card">
+              <div class="field-grid">
+                <div class="field"><label for="occurred-at">日期和时间</label><input id="occurred-at" type="datetime-local" data-draft-field="occurredAt" value="${escapeHtml(draft.occurredAt)}"></div>
+                <div class="field"><label for="account-name">${draft.type === "transfer" ? "转出账户" : "账户"}</label><input id="account-name" data-draft-field="accountName" value="${escapeHtml(draft.accountName)}" placeholder="例如：微信"></div>
+                ${draft.type === "transfer" ? `<div class="field"><label for="destination-account">转入账户</label><input id="destination-account" data-draft-field="destinationAccountName" value="${escapeHtml(draft.destinationAccountName)}" placeholder="例如：银行卡"></div>` : ""}
+              </div>
+            </section>
+          </div>
+          <div class="modal-save-bar">
+            <button class="action-button save-record-button" type="submit">保存这笔记录</button>
+          </div>
         </form>
       </section>
     </div>`;

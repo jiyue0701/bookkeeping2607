@@ -421,6 +421,20 @@ h3 { font-size: 16px; }
 .type-pill.active.income { background: var(--mint); color: white; }
 .type-pill.active.transfer { background: var(--yellow); color: var(--ink); }
 
+.add-record-form {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.add-form-scroll {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 2px 8px;
+  -webkit-overflow-scrolling: touch;
+}
+
 .amount-card { padding: 17px 17px 19px; text-align: center; }
 .amount-label { color: var(--muted); font-size: 12px; font-weight: 800; }
 .amount-entry { display: flex; align-items: baseline; justify-content: center; gap: 5px; margin-top: 3px; }
@@ -458,6 +472,16 @@ h3 { font-size: 16px; }
 
 .action-button.secondary { background: rgba(255, 255, 255, .68); box-shadow: none; }
 .action-button.danger { background: #fff0ef; color: var(--coral); box-shadow: none; }
+.modal-save-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  flex: 0 0 auto;
+  margin: 0 -2px;
+  padding: 10px 2px calc(2px + env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0), var(--paper) 22%, var(--paper));
+}
+.save-record-button { box-shadow: 0 10px 20px rgba(227, 178, 26, .22); }
 
 .settings-brand { justify-content: flex-start; }
 .settings-brand-copy { min-width: 0; }
@@ -608,6 +632,16 @@ h3 { font-size: 16px; }
   background: var(--paper);
   box-shadow: 0 -10px 34px rgba(23, 35, 41, .22);
   animation: sheet-in .2s ease-out;
+}
+
+.add-modal-sheet {
+  display: flex;
+  overflow: hidden;
+  flex-direction: column;
+}
+
+.quick-entry-sheet {
+  max-height: calc(100vh - 10px - env(safe-area-inset-top));
 }
 
 @keyframes sheet-in { from { transform: translateY(16px); opacity: .5; } to { transform: translateY(0); opacity: 1; } }
