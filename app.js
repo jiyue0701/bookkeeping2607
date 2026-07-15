@@ -82,6 +82,10 @@ let lastManualBackupAt = loadLastManualBackupAt();
 let cloudSyncConfig = loadCloudSyncConfig();
 let cloudSyncStatus = "";
 let cloudSyncBusy = false;
+let mascotReactionTimer = null;
+let mascotEntryPending = true;
+let serviceWorkerControllerBound = false;
+let serviceWorkerSwapPending = false;
 records = loadRecords();
 
 function categoryObjects(type) {
@@ -547,24 +551,76 @@ function disableCloudSync() {
   showToast("已关闭云备份");
 }
 
-async function refreshAppShell() {
-  showToast("正在刷新应用版本...");
-  try {
-    if ("serviceWorker" in navigator) {
-      const registrations = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(registrations.map((registration) => registration.update().catch(() => {})));
-    }
-    if ("caches" in window) {
-      const keys = await caches.keys();
-      await Promise.all(keys.map((key) => caches.delete(key)));
-    }
-  } catch (_) {
-    // Refresh is a convenience action; reloading still gives the browser a chance to fetch fresh files.
+function canReloadForServiceWorker() {
+  return !ui.modal && !ui.helpModal && !document.hidden;
+}
+
+function maybeReloadAfterServiceWorkerSwap() {
+  if (!serviceWorkerSwapPending || !canReloadForServiceWorker()) return;
+  serviceWorkerSwapPending = false;
+  window.location.reload();
+}
+
+function bindServiceWorkerRegistration(registration) {
+  if (!("serviceWorker" in navigator)) return;
+
+  const prepareInstallingWorker = (worker) => {
+    if (!worker) return;
+    worker.addEventListener("statechange", () => {
+      if (worker.state !== "installed" || !navigator.serviceWorker.controller) return;
+      serviceWorkerSwapPending = true;
+      worker.postMessage({ type: "SKIP_WAITING" });
+    });
+  };
+
+  prepareInstallingWorker(registration.installing);
+  registration.addEventListener("updatefound", () => prepareInstallingWorker(registration.installing));
+
+  if (registration.waiting && navigator.serviceWorker.controller) {
+    serviceWorkerSwapPending = true;
+    registration.waiting.postMessage({ type: "SKIP_WAITING" });
   }
 
-  const url = new URL(window.location.href);
-  url.searchParams.set("migao_refresh", Date.now().toString());
-  window.location.replace(url.toString());
+  if (serviceWorkerControllerBound) return;
+  serviceWorkerControllerBound = true;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    window.setTimeout(maybeReloadAfterServiceWorkerSwap, 80);
+  });
+  document.addEventListener("visibilitychange", maybeReloadAfterServiceWorkerSwap);
+  window.addEventListener("online", () => {
+    showToast("网络已恢复，正在检查米糕记账的新版本");
+    navigator.serviceWorker.getRegistration().then((current) => current?.update()).catch(() => {});
+  });
+  window.addEventListener("offline", () => {
+    showToast("当前无网络，继续使用本地版本，账单仍可正常记录");
+  });
+}
+
+async function refreshAppShell() {
+  if (navigator.onLine === false) {
+    showToast("当前无网络，继续使用本地版本，账单仍可正常记录");
+    return;
+  }
+
+  showToast("正在检查米糕记账的新版本...");
+  try {
+    const registration = "serviceWorker" in navigator
+      ? await navigator.serviceWorker.getRegistration()
+      : null;
+    if (registration) {
+      bindServiceWorkerRegistration(registration);
+      await registration.update();
+      if (registration.waiting) {
+        serviceWorkerSwapPending = true;
+        registration.waiting.postMessage({ type: "SKIP_WAITING" });
+        return;
+      }
+    }
+    showToast("已检查完成，正在重新载入当前版本");
+    window.setTimeout(() => window.location.reload(), 280);
+  } catch (_) {
+    showToast("网络暂时不可用，已保留当前本地版本");
+  }
 }
 
 function backupFileStamp(date = new Date()) {
@@ -1088,6 +1144,16 @@ function renderEmptyState(title, description, mark = "✦") {
   return `<div class="empty-state"><div class="empty-mark">${mark}</div><strong>${title}</strong><span>${description}</span></div>`;
 }
 
+function triggerMascotReaction() {
+  const companion = document.querySelector("[data-mascot-companion]");
+  if (!companion || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+  companion.classList.remove("is-reacting");
+  void companion.offsetWidth;
+  companion.classList.add("is-reacting");
+  window.clearTimeout(mascotReactionTimer);
+  mascotReactionTimer = window.setTimeout(() => companion.classList.remove("is-reacting"), 920);
+}
+
 function renderHome() {
   const today = new Date();
   const todayRecords = recordsForDay(dateKey(today));
@@ -1097,25 +1163,39 @@ function renderHome() {
 
   return `
     <div class="page page-home">
-      <section class="hero">
-        <div class="hero-copy">
-          <h1>欢迎光临 ✦</h1>
-          <p>默认账本 · ${longDateLabel(today)}</p>
+      <section class="home-intro">
+        <div class="home-intro-copy">
+          <span class="eyebrow">默认账本</span>
+          <h1>米糕记账</h1>
+          <p>嗨，米糕陪你记录每一笔 ✦</p>
+          <span class="home-date">${longDateLabel(today)}</span>
         </div>
-        <img class="mascot" src="./assets/black-shiba-mascot.png" alt="米糕黑柴记账助手">
       </section>
 
-      <section class="paper-card">
-        <div class="summary-heading"><strong>本月概览</strong><span>${monthLabel(today)}</span></div>
+      <section class="paper-card home-summary-card">
+        <div class="summary-heading home-summary-heading">
+          <div><strong>本月概览</strong><span>${monthLabel(today)}</span></div>
+          <button class="home-summary-detail" type="button" data-tab="ledger">查看明细 <span aria-hidden="true">›</span></button>
+        </div>
+        <button class="home-mascot-button" type="button" data-action="mascot-react" data-mascot-companion aria-label="和米糕打个招呼">
+          <span class="mascot-stage" aria-hidden="true">
+            <img class="home-mascot-image mascot-idle" src="./assets/black-shiba-mascot.png" alt="">
+            <img class="home-mascot-image mascot-active" src="./assets/black-shiba-mascot-active.png" alt="">
+          </span>
+        </button>
         <div class="summary-grid">
           <div class="summary-item"><span>本月支出</span><strong class="expense-text">${formatMoney(totals.expense)}</strong></div>
           <div class="summary-item"><span>本月收入</span><strong class="income-text">${formatMoney(totals.income)}</strong></div>
           <div class="summary-item"><span>本月结余</span><strong class="ink-text">${formatBalance(totals.balance)}</strong></div>
         </div>
+        <button class="home-primary-action" type="button" data-action="add">
+          <span class="home-primary-icon" aria-hidden="true"><svg viewBox="0 0 28 28"><path d="M6.5 17.6 17 7.1l4 4L10.5 21.6 5.2 23Z"></path><path d="m15.6 8.5 4 4"></path><path d="m6.5 17.6 4 4L5.2 23Z"></path></svg></span>
+          <span>记一笔</span>
+        </button>
       </section>
 
       <section class="paper-card receipt-card">
-        <div class="summary-heading"><strong>今日小票</strong><span class="expense-text">${formatMoney(todayExpense)}</span></div>
+        <div class="summary-heading"><strong>今日记录</strong><span class="expense-text">${formatMoney(todayExpense)}</span></div>
         ${todayRecords.length ? `<div class="record-list">${todayRecords.slice(0, 6).map((record) => renderRecordRow(record)).join("")}</div>` : renderEmptyState("今天还没有记录", "点下面的铅笔，记下第一笔吧", "📝")}
         <div class="receipt-total"><span>今日支出</span><strong class="expense-text">${formatMoney(todayExpense)}</strong></div>
       </section>
@@ -1384,7 +1464,7 @@ function renderSettings() {
   const preview = categoriesFor("expense").slice(0, 8);
   return `
     <div class="page">
-      <div class="page-title-row"><div><span class="eyebrow">本地 · 米糕</span><h1>我的</h1></div><span class="small-chip">v1.2</span></div>
+      <div class="page-title-row"><div><span class="eyebrow">本地 · 米糕</span><h1>我的</h1></div><span class="small-chip">v1.4</span></div>
       <section class="paper-card">
         <div class="settings-brand"><img class="mascot small" src="./assets/black-shiba-mascot.png" alt="米糕黑柴"><div class="settings-brand-copy"><strong>米糕记账</strong><span>记录每一个值得记住的日常</span></div></div>
       </section>
@@ -1515,6 +1595,8 @@ function renderModals() {
 }
 
 function render() {
+  const shouldReactOnEntry = ui.tab === "home" && mascotEntryPending;
+  if (ui.tab !== "home") mascotEntryPending = true;
   document.querySelector("#page").innerHTML = {
     home: renderHome,
     ledger: renderLedger,
@@ -1526,6 +1608,11 @@ function render() {
   document.querySelectorAll(".nav-item[data-tab]").forEach((button) => {
     button.classList.toggle("active", button.dataset.tab === ui.tab);
   });
+  if (shouldReactOnEntry) {
+    mascotEntryPending = false;
+    window.setTimeout(triggerMascotReaction, 260);
+  }
+  window.setTimeout(maybeReloadAfterServiceWorkerSwap, 0);
 }
 
 function openAddModal() {
@@ -1771,6 +1858,9 @@ function handleClick(event) {
     case "refresh-app":
       refreshAppShell();
       break;
+    case "mascot-react":
+      triggerMascotReaction();
+      break;
     case "cloud-enable":
       enableCloudSync();
       break;
@@ -1860,7 +1950,12 @@ function init() {
   }
 
   if ("serviceWorker" in navigator && ["https:", "http:"].includes(window.location.protocol)) {
-    navigator.serviceWorker.register("./service-worker.js").catch(() => {});
+    navigator.serviceWorker.register("./service-worker.js")
+      .then((registration) => {
+        bindServiceWorkerRegistration(registration);
+        if (navigator.onLine !== false) registration.update().catch(() => {});
+      })
+      .catch(() => {});
   }
   if (navigator.storage && typeof navigator.storage.persist === "function") {
     navigator.storage.persist().catch(() => {});
