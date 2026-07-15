@@ -324,7 +324,7 @@ h3 { font-size: 16px; }
   cursor: pointer;
 }
 
-.calendar-cell:active { transform: scale(.97); }
+.calendar-cell:active { background: rgba(42, 189, 176, .13); }
 .calendar-cell.selected { border-color: var(--mint); background: var(--mint); color: white; }
 .calendar-cell.has-expense:not(.selected) { background: #fff1f0; }
 .calendar-day { display: block; padding-top: 8px; font-size: 14px; font-weight: 800; }
@@ -377,12 +377,28 @@ h3 { font-size: 16px; }
 .trend-summary strong { color: var(--coral); font-size: 15px; }
 .chart-note { margin-top: 10px; color: var(--muted); font-size: 12px; }
 
-.ranking-list { display: grid; gap: 15px; }
+.ranking-list { display: grid; gap: 11px; }
+.ranking-item {
+  width: 100%;
+  padding: 8px 8px 9px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.ranking-item.selected {
+  border-color: rgba(42, 189, 176, .25);
+  background: rgba(216, 245, 239, .42);
+}
 .ranking-top { display: flex; align-items: center; gap: 10px; }
 .ranking-top .ranking-name { flex: 1; min-width: 0; font-size: 14px; font-weight: 800; }
+.ranking-count { color: var(--muted); font-size: 11px; font-weight: 800; white-space: nowrap; }
 .ranking-top .ranking-value { color: var(--coral); font-size: 13px; font-weight: 900; }
-.progress-track { height: 7px; margin: 7px 0 0 53px; overflow: hidden; border-radius: 999px; background: #ffe5e3; }
+.progress-track { height: 7px; margin: 7px 0 0 45px; overflow: hidden; border-radius: 999px; background: #ffe5e3; }
 .progress-value { height: 100%; border-radius: inherit; background: var(--coral); }
+.category-detail-card .record-list { margin-top: 4px; }
 
 .quick-list { display: grid; gap: 12px; }
 .quick-row { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 14px; font-weight: 700; }

@@ -56,6 +56,7 @@ const ui = {
   monthCursor: startOfMonth(new Date()),
   selectedDate: dateKey(new Date()),
   trendSelectedDate: null,
+  statsCategoryId: null,
   modal: false,
   helpModal: false,
   quickEntry: false,
@@ -1175,10 +1176,18 @@ function renderFlow(monthRecords) {
   }).join("");
 }
 
+function renderSelectedDateCard(selectedKey) {
+  const selectedRecords = recordsForDay(selectedKey);
+  return `
+    <section class="paper-card selected-date-card" data-selected-date-card>
+      <div class="section-heading"><div><h2>${dayLabel(dateFromKey(selectedKey))}</h2><div class="subtle">当天记录</div></div><span class="small-chip">${selectedRecords.length} 笔</span></div>
+      ${selectedRecords.length ? `<div class="record-list">${selectedRecords.map((record) => renderRecordRow(record, true)).join("")}</div>` : renderEmptyState("这一天还没有记录", "选择其他日期，或直接记一笔", "☀")}
+    </section>`;
+}
+
 function renderCalendar(monthRecords) {
   const month = ui.monthCursor;
   const selectedKey = sameMonth(dateFromKey(ui.selectedDate), month) ? ui.selectedDate : dateKey(month);
-  const selectedRecords = recordsForDay(selectedKey);
   const cells = calendarDays(month).map((date) => {
     if (!date) return `<span class="calendar-cell" aria-hidden="true"></span>`;
     const key = dateKey(date);
@@ -1195,10 +1204,7 @@ function renderCalendar(monthRecords) {
       <div class="weekdays">${WEEKDAYS.map((weekday) => `<span>${weekday}</span>`).join("")}</div>
       <div class="calendar-grid">${cells}</div>
     </section>
-    <section class="paper-card selected-date-card">
-      <div class="section-heading"><div><h2>${dayLabel(dateFromKey(selectedKey))}</h2><div class="subtle">当天记录</div></div><span class="small-chip">${selectedRecords.length} 笔</span></div>
-      ${selectedRecords.length ? `<div class="record-list">${selectedRecords.map((record) => renderRecordRow(record, true)).join("")}</div>` : renderEmptyState("这一天还没有记录", "选择其他日期，或直接记一笔", "☀")}
-    </section>`;
+    ${renderSelectedDateCard(selectedKey)}`;
 }
 
 function renderStatistics() {
@@ -1316,11 +1322,16 @@ function rankingStats(monthRecords) {
   const map = new Map();
   monthRecords.filter((record) => record.type === "expense").forEach((record) => {
     if (!map.has(record.categoryId)) {
-      map.set(record.categoryId, { name: record.categoryName, icon: record.categoryIcon, amountCents: 0 });
+      map.set(record.categoryId, { id: record.categoryId, name: record.categoryName, icon: record.categoryIcon, amountCents: 0, records: [] });
     }
-    map.get(record.categoryId).amountCents += record.amountCents;
+    const item = map.get(record.categoryId);
+    item.amountCents += record.amountCents;
+    item.records.push(record);
   });
-  return Array.from(map.values()).sort((left, right) => right.amountCents - left.amountCents);
+  return Array.from(map.values()).map((item) => ({
+    ...item,
+    records: item.records.sort((left, right) => new Date(right.occurredAt) - new Date(left.occurredAt))
+  })).sort((left, right) => right.amountCents - left.amountCents);
 }
 
 function renderRanking(monthRecords) {
@@ -1329,16 +1340,22 @@ function renderRanking(monthRecords) {
     return `<section class="paper-card">${renderEmptyState("还没有分类排行", "记录几笔支出后，就能看到消费去向", "🏷")}</section>`;
   }
   const max = stats[0].amountCents || 1;
+  const selected = stats.find((item) => item.id === ui.statsCategoryId) || stats[0];
+  ui.statsCategoryId = selected.id;
   return `
     <section class="paper-card stats-card">
       <div class="section-heading"><div><h2>分类排行</h2><div class="subtle">按支出金额从高到低</div></div><span class="small-chip">${stats.length} 类</span></div>
       <div class="ranking-list">
         ${stats.map((item) => `
-          <div>
-            <div class="ranking-top"><span class="category-icon expense">${escapeHtml(item.icon)}</span><span class="ranking-name">${escapeHtml(item.name)}</span><span class="ranking-value">${formatMoney(item.amountCents)}</span></div>
+          <button class="ranking-item ${item.id === selected.id ? "selected" : ""}" type="button" data-action="stats-category" data-category="${escapeHtml(item.id)}">
+            <div class="ranking-top"><span class="category-icon expense">${escapeHtml(item.icon)}</span><span class="ranking-name">${escapeHtml(item.name)}</span><span class="ranking-count">${item.records.length} 笔</span><span class="ranking-value">${formatMoney(item.amountCents)}</span></div>
             <div class="progress-track"><div class="progress-value" style="width:${(item.amountCents / max) * 100}%"></div></div>
-          </div>`).join("")}
+          </button>`).join("")}
       </div>
+    </section>
+    <section class="paper-card category-detail-card">
+      <div class="section-heading"><div><h2>${escapeHtml(selected.name)}明细</h2><div class="subtle">${selected.records.length} 笔支出 · 合计 ${formatMoney(selected.amountCents)}</div></div><span class="category-icon expense">${escapeHtml(selected.icon)}</span></div>
+      <div class="record-list">${selected.records.map((record) => renderRecordRow(record, true)).join("")}</div>
     </section>`;
 }
 
@@ -1634,6 +1651,24 @@ function stopTrendPointer() {
   trendDragActive = false;
 }
 
+function updateCalendarSelection(selectedDate) {
+  ui.selectedDate = selectedDate;
+  const selectedCard = document.querySelector("[data-selected-date-card]");
+  if (!selectedCard || ui.tab !== "ledger" || ui.ledgerMode !== "calendar") return false;
+  document.querySelectorAll(".calendar-cell[data-date]").forEach((cell) => {
+    cell.classList.toggle("selected", cell.dataset.date === selectedDate);
+  });
+  selectedCard.outerHTML = renderSelectedDateCard(selectedDate);
+  return true;
+}
+
+function updateStatsCategory(categoryId) {
+  ui.statsCategoryId = categoryId;
+  if (ui.tab !== "statistics" || ui.statisticsMode !== "ranking") return false;
+  render();
+  return true;
+}
+
 function deleteRecord(id) {
   const record = records.find((item) => item.id === id);
   if (!record) return;
@@ -1749,8 +1784,10 @@ function handleClick(event) {
       render();
       break;
     case "calendar-date":
-      ui.selectedDate = actionElement.dataset.date;
-      render();
+      if (!updateCalendarSelection(actionElement.dataset.date)) render();
+      break;
+    case "stats-category":
+      updateStatsCategory(actionElement.dataset.category);
       break;
     case "trend-day":
       if (Date.now() - trendPointerHandledAt > 450) activateTrendDay(actionElement);
