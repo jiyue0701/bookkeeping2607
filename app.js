@@ -66,6 +66,8 @@ let toastTimer = null;
 let autoBackupTimer = null;
 let midnightBackupTimer = null;
 let cloudBackupTimer = null;
+let cloudStartupSyncDone = false;
+let cloudSyncDirty = false;
 let autoBackupStatus = {
   supported: typeof window !== "undefined" && !!window.indexedDB,
   available: false,
@@ -345,13 +347,14 @@ async function cloudRequest(path, options = {}) {
 
 function cloudSyncText() {
   if (cloudSyncStatus) return cloudSyncStatus;
-  if (!cloudSyncConfig) return "未开启。使用手机号作为账号，再设置同步密码/PIN；云端只保存加密后的备份。";
+  if (!cloudSyncConfig) return "未开启。使用手机号作为账号，再设置同步密码/PIN；开启后会自动拉取合并、保存后自动上传。";
   const last = cloudSyncConfig.lastUploadedAt ? `上次云备份：${backupTimeLabel(cloudSyncConfig.lastUploadedAt)}` : "还没有上传过云备份";
-  return `${cloudSyncConfig.accountLabel} 已开启。${last}`;
+  return `${cloudSyncConfig.accountLabel} 已开启自动同步。打开时自动合并云端账单，记账后自动上传。${last}`;
 }
 
 function scheduleCloudBackup() {
   if (!cloudSyncConfig?.enabled) return;
+  cloudSyncDirty = true;
   if (cloudBackupTimer) window.clearTimeout(cloudBackupTimer);
   cloudBackupTimer = window.setTimeout(() => {
     cloudBackupTimer = null;
@@ -382,6 +385,7 @@ async function uploadCloudBackup(manual = true) {
       ...cloudSyncConfig,
       lastUploadedAt: data?.updatedAt || new Date().toISOString()
     });
+    cloudSyncDirty = false;
     cloudSyncStatus = manual ? "云备份已上传" : "";
     if (manual) showToast("云备份已上传");
     return true;
@@ -395,11 +399,13 @@ async function uploadCloudBackup(manual = true) {
   }
 }
 
-async function restoreCloudBackup() {
-  if (!cloudSyncConfig?.enabled || cloudSyncBusy) return;
+async function mergeCloudBackup({ manual = true, uploadAfterMerge = true } = {}) {
+  if (!cloudSyncConfig?.enabled || cloudSyncBusy) return false;
   cloudSyncBusy = true;
-  cloudSyncStatus = "正在读取云备份...";
-  render();
+  if (manual) {
+    cloudSyncStatus = "正在读取云备份...";
+    render();
+  }
   try {
     const data = await cloudRequest(`/api/backup?account=${encodeURIComponent(cloudSyncConfig.accountId)}`, {
       method: "GET",
@@ -419,15 +425,44 @@ async function restoreCloudBackup() {
       ...cloudSyncConfig,
       lastRestoredAt: new Date().toISOString()
     });
-    cloudSyncStatus = `已从云端合并 ${result.imported} 笔，新增 ${result.added} 笔`;
-    showToast(cloudSyncStatus);
+    cloudSyncStatus = manual
+      ? `已从云端合并 ${result.imported} 笔，新增 ${result.added} 笔`
+      : "";
+    if (manual) showToast(cloudSyncStatus);
+    if (uploadAfterMerge && (result.added || result.updated || cloudSyncDirty)) {
+      scheduleCloudBackup();
+    }
+    return true;
   } catch (error) {
-    cloudSyncStatus = error?.message === "not found" ? "云端还没有备份" : "读取云备份失败：请检查账号、PIN 或网络";
-    showToast(cloudSyncStatus);
+    if (error?.message === "not found") {
+      cloudSyncStatus = manual ? "云端还没有备份，将上传本机账单" : "";
+      if (manual) showToast(cloudSyncStatus);
+      return true;
+    }
+    cloudSyncStatus = "读取云备份失败：请检查账号、PIN 或网络";
+    if (manual) showToast(cloudSyncStatus);
+    return false;
   } finally {
     cloudSyncBusy = false;
-    render();
+    if (ui.tab === "settings" || manual) render();
   }
+}
+
+async function syncCloudNow(manual = true) {
+  const merged = await mergeCloudBackup({ manual, uploadAfterMerge: false });
+  if (!cloudSyncConfig?.enabled) return false;
+  if (merged || cloudSyncDirty || manual) {
+    return uploadCloudBackup(manual);
+  }
+  return true;
+}
+
+function scheduleStartupCloudSync() {
+  if (!cloudSyncConfig?.enabled || cloudStartupSyncDone) return;
+  cloudStartupSyncDone = true;
+  window.setTimeout(() => {
+    syncCloudNow(false);
+  }, 800);
 }
 
 async function enableCloudSync() {
@@ -456,9 +491,10 @@ async function enableCloudSync() {
       lastRestoredAt: null
     });
     cloudSyncBusy = false;
-    const uploaded = await uploadCloudBackup(false);
-    if (!uploaded) throw new Error("upload failed");
-    cloudSyncStatus = "云备份已开启，并已上传当前账单";
+    const synced = await syncCloudNow(false);
+    if (!synced) throw new Error("sync failed");
+    cloudStartupSyncDone = true;
+    cloudSyncStatus = "云备份已开启；以后打开自动合并，记账后自动上传";
     showToast("云备份已开启");
   } catch (error) {
     saveCloudSyncConfig(null);
@@ -472,6 +508,8 @@ async function enableCloudSync() {
 
 function disableCloudSync() {
   saveCloudSyncConfig(null);
+  cloudStartupSyncDone = false;
+  cloudSyncDirty = false;
   cloudSyncStatus = "已关闭本机云备份配置；云端旧备份不会自动删除。";
   render();
   showToast("已关闭云备份");
@@ -1223,12 +1261,12 @@ function renderSettings() {
         </div>
       </section>
       <section class="paper-card backup-card">
-        <div class="section-heading"><div><h2>数据管理</h2><div class="subtle">合并、导出、恢复都从这里做</div></div><span class="small-chip">${records.length} 笔</span></div>
-        <div class="subtle backup-note">主屏幕独立 Web App 和 Safari 可能是两套本地账单。网页不能直接跨读取另一套存储；需要先在有旧账单的入口导出 JSON，再到长期使用的主屏幕 Web App 里导入。导入会合并当前账单，不会直接覆盖。</div>
+        <div class="section-heading"><div><h2>数据管理</h2><div class="subtle">本机备份和旧数据导入</div></div><span class="small-chip">${records.length} 笔</span></div>
+        <div class="subtle backup-note">主屏幕独立 Web App 和 Safari 可能是两套本地账单。开启云备份后，两边只要使用同一个手机号账号和同步密码，打开时会自动从云端合并，记账后会自动上传。JSON 导入导出只作为兜底备份。</div>
         <div class="merge-steps">
-          <div><strong>1</strong><span>在 Safari 那套账单里导出 JSON 备份</span></div>
-          <div><strong>2</strong><span>回到主屏幕 Web App，点“导入 JSON 备份”</span></div>
-          <div><strong>3</strong><span>新增记录会加入，重复记录只在备份更新时替换</span></div>
+          <div><strong>1</strong><span>在有旧账单的入口开启同一个云备份账号</span></div>
+          <div><strong>2</strong><span>回到主屏幕 Web App，使用同一手机号和同步密码开启云备份</span></div>
+          <div><strong>3</strong><span>以后打开自动合并，保存账单后自动上传</span></div>
         </div>
         <div class="backup-auto-note">↻ ${autoBackupText()}</div>
         <div class="backup-manual-note">${manualBackupText()}</div>
@@ -1237,20 +1275,14 @@ function renderSettings() {
           <button class="action-button secondary" type="button" data-action="import-data">导入 JSON 备份</button>
           <input type="file" accept="application/json,.json" data-backup-input hidden>
         </div>
-        <div class="modal-actions">
-          <button class="action-button secondary" type="button" data-action="demo-data">加入演示账单</button>
-        </div>
       </section>
       <section class="paper-card cloud-card">
         <div class="section-heading"><div><h2>云备份</h2><div class="subtle">手机号作为账号，同步密码/PIN 负责加密</div></div><span class="small-chip">可选</span></div>
-        <div class="subtle backup-note">云备份用于换手机、重装或合并多入口账单。账单上传前会在本机加密，云端只保存密文；请记住手机号和同步密码，忘记密码无法解密云端备份。</div>
+        <div class="subtle backup-note">云备份用于换手机、重装或自动合并 Safari/Web App 两套账单。账单上传前会在本机加密，云端只保存密文；请记住手机号和同步密码，忘记密码无法解密云端备份。</div>
         <div class="backup-auto-note">☁ ${cloudSyncText()}</div>
         ${cloudSyncConfig ? `
           <div class="backup-actions">
-            <button class="action-button secondary" type="button" data-action="cloud-upload" ${cloudSyncBusy ? "disabled" : ""}>立即上传云备份</button>
-            <button class="action-button secondary" type="button" data-action="cloud-restore" ${cloudSyncBusy ? "disabled" : ""}>从云端恢复合并</button>
-          </div>
-          <div class="modal-actions">
+            <button class="action-button secondary" type="button" data-action="cloud-sync" ${cloudSyncBusy ? "disabled" : ""}>立即同步</button>
             <button class="action-button secondary" type="button" data-action="cloud-disable" ${cloudSyncBusy ? "disabled" : ""}>关闭本机云备份配置</button>
           </div>
         ` : `
@@ -1259,7 +1291,7 @@ function renderSettings() {
             <div class="field"><label for="cloud-phone">手机号账号</label><input id="cloud-phone" data-cloud-field="phone" inputmode="tel" autocomplete="tel" placeholder="例如：13800138000"></div>
             <div class="field"><label for="cloud-pin">同步密码 / PIN</label><input id="cloud-pin" data-cloud-field="pin" type="password" autocomplete="new-password" placeholder="至少 4 位，务必记住"></div>
           </div>
-          <button class="action-button" type="button" data-action="cloud-enable" ${cloudSyncBusy ? "disabled" : ""}>开启云备份并上传当前账单</button>
+          <button class="action-button" type="button" data-action="cloud-enable" ${cloudSyncBusy ? "disabled" : ""}>开启自动云备份</button>
         `}
       </section>
       <section class="paper-card">
@@ -1315,12 +1347,12 @@ function renderHelpModal() {
           <div class="help-step"><b>2</b><div>点击底部或顶部的<strong>分享</strong>按钮。</div></div>
            <div class="help-step"><b>3</b><div>选择<strong>添加到主屏幕</strong>，确认名称为“米糕记账”。</div></div>
            <div class="help-step"><b>4</b><div>从主屏幕打开图标，就会以独立网页 App 的样式运行。</div></div>
-           <p>数据保存在本机浏览器里。换手机或清除网站数据前，请到“我的 → 数据管理”导出 JSON 备份；在新设备打开后，再用“导入 JSON 备份”恢复。</p>
+           <p>数据保存在本机浏览器里。长期使用建议开启云备份；之后打开自动合并，记账后自动上传。JSON 备份只作为兜底。</p>
           <section class="quick-help-card">
             <h3>双击辅助触控，快速记一笔</h3>
             <p>长期使用固定从主屏幕“米糕记账”图标打开。这个入口会使用独立 Web App 的本地账单，界面也没有 Safari 地址栏。</p>
             <p>新版配置里已经加入“快速记账”Web App 快捷项；如果你的 iOS 在主屏幕长按图标时显示它，优先从这里打开快速记账。不要把快捷指令里的“打开 URL”作为日常入口，它通常会进入 Safari 的另一套账单空间。</p>
-            <p><strong>合并提醒：</strong>如果 Safari 里已经有旧账单，先在 Safari 那套导出 JSON，再回到主屏幕 Web App 的“我的 → 数据管理”导入合并。</p>
+            <p><strong>合并提醒：</strong>如果 Safari 里已经有旧账单，在 Safari 那套也开启同一个云备份账号；再回到主屏幕 Web App 开启同一账号，就会自动合并。</p>
           </section>
          </div>
         <div class="modal-actions"><button class="action-button secondary" type="button" data-action="close-help">知道了</button></div>
@@ -1371,27 +1403,6 @@ function showToast(message) {
   element.classList.add("show");
   window.clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => element.classList.remove("show"), 2300);
-}
-
-function addDemoData() {
-  const today = startOfDay(new Date());
-  const demo = [
-    [14.90, "expense", "gift", "请孙浩铭喝奶茶", 0],
-    [15.60, "expense", "transport", "打车上班", 0],
-    [55.50, "expense", "shopping", "温湿度计×2", -1],
-    [2.70, "expense", "transport", "回家地铁", -1],
-    [21.50, "expense", "food", "午餐", -1],
-    [3200.00, "income", "salary", "月度工资", -4]
-  ];
-  demo.forEach(([amount, type, categoryId, note, offset]) => {
-    const category = categoriesFor(type).find((item) => item.id === categoryId) || categoriesFor(type)[0];
-    const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() + offset, 12, 0);
-    records.push(createRecord({ type, note, occurredAt: dateTimeValue(date), accountName: "微信", destinationAccountName: "银行卡" }, Math.round(amount * 100), category));
-  });
-  persistRecords();
-  ui.tab = "home";
-  render();
-  showToast("已加入一组演示账单");
 }
 
 function deleteRecord(id) {
@@ -1468,11 +1479,8 @@ function handleClick(event) {
     case "cloud-enable":
       enableCloudSync();
       break;
-    case "cloud-upload":
-      uploadCloudBackup(true);
-      break;
-    case "cloud-restore":
-      restoreCloudBackup();
+    case "cloud-sync":
+      syncCloudNow(true);
       break;
     case "cloud-disable":
       disableCloudSync();
@@ -1514,9 +1522,6 @@ function handleClick(event) {
       break;
     case "delete-record":
       deleteRecord(actionElement.dataset.id);
-      break;
-    case "demo-data":
-      addDemoData();
       break;
     default:
       break;
@@ -1560,6 +1565,7 @@ function init() {
   scheduleMidnightBackup();
   loadAutoBackupStatus();
   restoreAutoBackupIfNeeded();
+  scheduleStartupCloudSync();
 }
 
 init();
