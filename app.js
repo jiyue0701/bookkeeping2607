@@ -163,6 +163,7 @@ function loadCloudSyncConfig() {
       accountId: String(value.accountId),
       authHash: String(value.authHash),
       encryptionKey: String(value.encryptionKey),
+      identityVersion: Number(value.identityVersion || 1),
       lastUploadedAt: value.lastUploadedAt || null,
       lastRestoredAt: value.lastRestoredAt || null
     };
@@ -277,14 +278,19 @@ async function deriveCloudIdentity(phone, pin) {
   const derived = new Uint8Array(bits);
   const encryptionKey = bytesToBase64(derived.slice(0, 32));
   const authSecret = bytesToBase64(derived.slice(32, 64));
-  const accountId = await sha256Hex(`migao-account:${normalizedPhone}:${normalizedPin}`);
+  const accountId = await sha256Hex(`migao-account-v2:${normalizedPhone}`);
+  const legacyAccountId = await sha256Hex(`migao-account:${normalizedPhone}:${normalizedPin}`);
   const authHash = await sha256Hex(`migao-auth:${accountId}:${authSecret}`);
+  const legacyAuthHash = await sha256Hex(`migao-auth:${legacyAccountId}:${authSecret}`);
 
   return {
     accountId,
     authHash,
     encryptionKey,
-    accountLabel: maskPhone(normalizedPhone)
+    accountLabel: maskPhone(normalizedPhone),
+    identityVersion: 2,
+    legacyAccountId,
+    legacyAuthHash
   };
 }
 
@@ -348,6 +354,7 @@ async function cloudRequest(path, options = {}) {
 function cloudSyncText() {
   if (cloudSyncStatus) return cloudSyncStatus;
   if (!cloudSyncConfig) return "未开启。使用手机号作为账号，再设置同步密码/PIN；开启后会自动拉取合并、保存后自动上传。";
+  if (cloudSyncConfig.identityVersion !== 2) return `${cloudSyncConfig.accountLabel} 使用旧版云备份配置。同手机号不同 PIN 会分成两套备份；建议关闭后用最终 PIN 重新开启。`;
   const last = cloudSyncConfig.lastUploadedAt ? `上次云备份：${backupTimeLabel(cloudSyncConfig.lastUploadedAt)}` : "还没有上传过云备份";
   return `${cloudSyncConfig.accountLabel} 已开启自动同步。打开时自动合并云端账单，记账后自动上传。${last}`;
 }
@@ -389,9 +396,11 @@ async function uploadCloudBackup(manual = true) {
     cloudSyncStatus = manual ? "云备份已上传" : "";
     if (manual) showToast("云备份已上传");
     return true;
-  } catch (_) {
-    cloudSyncStatus = "云备份失败：请检查 Worker 地址或网络";
-    if (manual) showToast("云备份失败，请稍后重试");
+  } catch (error) {
+    cloudSyncStatus = error?.message === "forbidden"
+      ? "同步密码不匹配：这个手机号已绑定其它同步密码"
+      : "云备份失败：请检查 Worker 地址或网络";
+    if (manual) showToast(cloudSyncStatus);
     return false;
   } finally {
     cloudSyncBusy = false;
@@ -399,7 +408,13 @@ async function uploadCloudBackup(manual = true) {
   }
 }
 
-async function mergeCloudBackup({ manual = true, uploadAfterMerge = true } = {}) {
+async function mergeCloudBackup({
+  manual = true,
+  uploadAfterMerge = true,
+  accountId = cloudSyncConfig?.accountId,
+  authHash = cloudSyncConfig?.authHash,
+  encryptionKey = cloudSyncConfig?.encryptionKey
+} = {}) {
   if (!cloudSyncConfig?.enabled || cloudSyncBusy) return false;
   cloudSyncBusy = true;
   if (manual) {
@@ -407,11 +422,11 @@ async function mergeCloudBackup({ manual = true, uploadAfterMerge = true } = {})
     render();
   }
   try {
-    const data = await cloudRequest(`/api/backup?account=${encodeURIComponent(cloudSyncConfig.accountId)}`, {
+    const data = await cloudRequest(`/api/backup?account=${encodeURIComponent(accountId)}`, {
       method: "GET",
-      headers: { "x-migao-auth": cloudSyncConfig.authHash }
+      headers: { "x-migao-auth": authHash }
     });
-    const payload = await decryptCloudPayload(data.encryptedPayload, cloudSyncConfig.encryptionKey);
+    const payload = await decryptCloudPayload(data.encryptedPayload, encryptionKey);
     const incoming = (payload?.records || []).map(normalizeRecord).filter((record) => record.amountCents > 0);
     const previousRecords = records;
     const result = mergeRecords(records, incoming);
@@ -439,7 +454,9 @@ async function mergeCloudBackup({ manual = true, uploadAfterMerge = true } = {})
       if (manual) showToast(cloudSyncStatus);
       return true;
     }
-    cloudSyncStatus = "读取云备份失败：请检查账号、PIN 或网络";
+    cloudSyncStatus = error?.message === "forbidden"
+      ? "同步密码不匹配：这个手机号已绑定其它同步密码"
+      : "读取云备份失败：请检查账号、PIN 或网络";
     if (manual) showToast(cloudSyncStatus);
     return false;
   } finally {
@@ -487,10 +504,18 @@ async function enableCloudSync() {
       accountId: identity.accountId,
       authHash: identity.authHash,
       encryptionKey: identity.encryptionKey,
+      identityVersion: identity.identityVersion,
       lastUploadedAt: null,
       lastRestoredAt: null
     });
     cloudSyncBusy = false;
+    await mergeCloudBackup({
+      manual: false,
+      uploadAfterMerge: false,
+      accountId: identity.legacyAccountId,
+      authHash: identity.legacyAuthHash,
+      encryptionKey: identity.encryptionKey
+    });
     const synced = await syncCloudNow(false);
     if (!synced) throw new Error("sync failed");
     cloudStartupSyncDone = true;
@@ -1203,7 +1228,7 @@ function renderTrend(monthRecords) {
   const bars = daily.map((item) => {
     const height = item.amountCents ? Math.max(5, (item.amountCents / max) * 100) : 2;
     const label = item.date.getDate() % 5 === 0 || item.date.getDate() === 1 ? item.date.getDate() : "";
-    return `<div class="bar-slot" title="${dayLabel(item.date)}：${formatMoney(item.amountCents)}"><div class="bar" style="--bar-height:${height}%"></div><span>${label}</span></div>`;
+    return `<button class="bar-slot" type="button" data-action="trend-day" data-date="${dateKey(item.date)}" data-amount="${item.amountCents}" aria-label="${dayLabel(item.date)} ${formatMoney(item.amountCents)}"><div class="bar" style="--bar-height:${height}%"></div><span>${label}</span></button>`;
   }).join("");
 
   return `
@@ -1545,6 +1570,9 @@ function handleClick(event) {
     case "calendar-date":
       ui.selectedDate = actionElement.dataset.date;
       render();
+      break;
+    case "trend-day":
+      showToast(`${dayLabel(dateFromKey(actionElement.dataset.date))}：${formatMoney(Number(actionElement.dataset.amount || 0))}`);
       break;
     case "delete-record":
       deleteRecord(actionElement.dataset.id);
