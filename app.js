@@ -1686,6 +1686,17 @@ function updateStatsCategory(categoryId) {
   return true;
 }
 
+function updateDraftCategorySelection(categoryId) {
+  if (!ui.draft) return false;
+  ui.draft.categoryId = categoryId;
+  const buttons = document.querySelectorAll(".category-button[data-category]");
+  if (!buttons.length) return false;
+  buttons.forEach((button) => {
+    button.classList.toggle("selected", button.dataset.category === categoryId);
+  });
+  return true;
+}
+
 function deleteRecord(id) {
   const record = records.find((item) => item.id === id);
   if (!record) return;
@@ -1778,8 +1789,7 @@ function handleClick(event) {
       break;
     case "select-category":
       if (ui.draft) {
-        ui.draft.categoryId = actionElement.dataset.category;
-        render();
+        if (!updateDraftCategorySelection(actionElement.dataset.category)) render();
       }
       break;
     case "ledger-mode":
