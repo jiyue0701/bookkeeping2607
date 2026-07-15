@@ -515,6 +515,26 @@ function disableCloudSync() {
   showToast("已关闭云备份");
 }
 
+async function refreshAppShell() {
+  showToast("正在刷新应用版本...");
+  try {
+    if ("serviceWorker" in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((registration) => registration.update().catch(() => {})));
+    }
+    if ("caches" in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((key) => caches.delete(key)));
+    }
+  } catch (_) {
+    // Refresh is a convenience action; reloading still gives the browser a chance to fetch fresh files.
+  }
+
+  const url = new URL(window.location.href);
+  url.searchParams.set("migao_refresh", Date.now().toString());
+  window.location.replace(url.toString());
+}
+
 function backupFileStamp(date = new Date()) {
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}`;
 }
@@ -1243,7 +1263,7 @@ function renderSettings() {
   const preview = categoriesFor("expense").slice(0, 8);
   return `
     <div class="page">
-      <div class="page-title-row"><div><span class="eyebrow">本地 · 米糕</span><h1>我的</h1></div><span class="small-chip">v1.1</span></div>
+      <div class="page-title-row"><div><span class="eyebrow">本地 · 米糕</span><h1>我的</h1></div><span class="small-chip">v1.2</span></div>
       <section class="paper-card">
         <div class="settings-brand"><img class="mascot small" src="./assets/black-shiba-mascot.png" alt="米糕黑柴"><div class="settings-brand-copy"><strong>米糕记账</strong><span>记录每一个值得记住的日常</span></div></div>
       </section>
@@ -1258,6 +1278,9 @@ function renderSettings() {
           <div class="settings-line"><span class="line-icon">¥</span><span>人民币元，固定两位小数</span></div>
           <div class="settings-line"><span class="line-icon">⌁</span><span>网页更新不改变本地数据</span></div>
           <div class="settings-line"><span class="line-icon">↻</span><span>${autoBackupText()}</span></div>
+        </div>
+        <div class="settings-actions">
+          <button class="action-button secondary" type="button" data-action="refresh-app">刷新到最新版本</button>
         </div>
       </section>
       <section class="paper-card backup-card">
@@ -1475,6 +1498,9 @@ function handleClick(event) {
       break;
     case "import-data":
       document.querySelector("[data-backup-input]")?.click();
+      break;
+    case "refresh-app":
+      refreshAppShell();
       break;
     case "cloud-enable":
       enableCloudSync();
