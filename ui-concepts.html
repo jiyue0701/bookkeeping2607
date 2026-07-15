@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>米糕记账 UI 方向示意</title>
+  <style>
+    :root {
+      --mint: #2fc7b8;
+      --mint-soft: #c9f2ec;
+      --ink: #1d2730;
+      --muted: #78908e;
+      --coral: #ef526b;
+      --yellow: #ffd94f;
+      --paper: #fffdf8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 28px;
+      background: linear-gradient(160deg, #aeece4, #dcf8f2);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    .intro { margin: 0 0 24px; color: #4e6b69; font-weight: 700; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 22px;
+      align-items: start;
+    }
+    .concept {
+      padding: 18px;
+      border-radius: 28px;
+      background: rgba(255,255,255,.55);
+      box-shadow: 0 18px 50px rgba(33, 120, 116, .18);
+    }
+    .concept h2 { margin: 0 0 6px; font-size: 18px; }
+    .concept p { margin: 0 0 14px; color: var(--muted); font-size: 13px; font-weight: 700; line-height: 1.45; }
+    .phone {
+      width: 260px;
+      min-height: 520px;
+      margin: 0 auto;
+      padding: 22px 14px 86px;
+      position: relative;
+      overflow: hidden;
+      border-radius: 38px;
+      background: var(--mint-soft);
+      box-shadow: inset 0 0 0 2px rgba(255,255,255,.7);
+    }
+    .hero { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 18px; }
+    .eyebrow { display: block; color: #108c82; font-size: 12px; font-weight: 950; }
+    .title { display: block; margin-top: 4px; font-size: 30px; font-weight: 950; }
+    .migao {
+      width: 66px;
+      height: 66px;
+      border-radius: 23px;
+      background: #fff;
+      display: grid;
+      place-items: center;
+      box-shadow: 0 10px 22px rgba(41, 145, 138, .18);
+    }
+    .migao svg { width: 50px; height: 50px; }
+    .card {
+      margin-bottom: 14px;
+      padding: 16px;
+      border-radius: 20px;
+      background: rgba(255,255,255,.9);
+      box-shadow: 0 10px 24px rgba(55, 112, 108, .10);
+    }
+    .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; text-align: center; }
+    .summary span { color: var(--muted); font-size: 11px; font-weight: 850; }
+    .summary strong { display: block; margin-top: 6px; font-size: 14px; }
+    .expense { color: var(--coral); }
+    .income { color: var(--mint); }
+    .chart { height: 148px; position: relative; border-bottom: 1px dashed #b9cac7; }
+    .line {
+      position: absolute;
+      inset: 18px 0 28px;
+      background:
+        linear-gradient(#edf3f0 1px, transparent 1px) 0 0 / 100% 34px,
+        linear-gradient(110deg, transparent 0 34%, var(--coral) 35% 37%, transparent 38% 42%, var(--coral) 43% 45%, transparent 46%);
+    }
+    .bubble {
+      position: absolute;
+      left: 92px;
+      top: 8px;
+      padding: 9px 14px;
+      border-radius: 12px;
+      background: #fff0f3;
+      color: var(--coral);
+      font-weight: 950;
+      box-shadow: 0 3px 0 #ffd6de;
+    }
+    .list { display: grid; gap: 10px; }
+    .row { display: flex; align-items: center; gap: 10px; }
+    .icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 13px; background: #fff1f0; }
+    .row div { flex: 1; }
+    .row b { display: block; font-size: 13px; }
+    .row small { color: var(--muted); font-weight: 700; }
+    .nav {
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      bottom: 14px;
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      align-items: center;
+      padding: 9px;
+      border-radius: 28px;
+      background: rgba(255,255,255,.95);
+      box-shadow: 0 12px 28px rgba(38, 126, 121, .18);
+      text-align: center;
+      color: #9ccbc5;
+      font-size: 10px;
+      font-weight: 900;
+    }
+    .nav svg { width: 24px; height: 24px; display: block; margin: 0 auto 3px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+    .fab { transform: translateY(-22px); color: var(--ink); }
+    .fab i { display: grid; place-items: center; width: 58px; height: 58px; margin: 0 auto 3px; border: 5px solid white; border-radius: 50%; background: var(--yellow); font-style: normal; }
+    .b .phone { background: #f7fbf8; }
+    .b .card { border: 1px solid #e7efec; box-shadow: none; border-radius: 14px; }
+    .b .summary { text-align: left; }
+    .b .bubble { background: #1d2730; color: white; box-shadow: none; border-radius: 9px; }
+    .b .nav { border-radius: 18px; box-shadow: 0 8px 18px rgba(42, 80, 76, .10); }
+    .c .phone { background: #fbf1d1; box-shadow: inset 0 0 0 7px #ffd94f; }
+    .c .card { border: 2px dashed rgba(42, 189, 176, .22); border-radius: 24px; }
+    .c .chart { transform: rotate(-1.2deg); border: 2px solid rgba(42, 189, 176, .16); border-radius: 8px; }
+    .c .nav { border-radius: 999px; }
+  </style>
+</head>
+<body>
+  <h1>米糕记账 UI 方向示意</h1>
+  <p class="intro">先不改主应用。下面三套是视觉方向草图，选定后再深入到真实页面。</p>
+  <main class="grid">
+    <section class="concept a">
+      <h2>A. 柔和贴纸风</h2>
+      <p>保留现在的薄荷色和可爱感，卡片更干净，米糕作为陪伴角色。</p>
+      <div class="phone">
+        <div class="hero"><div><span class="eyebrow">趋势 · 分类</span><span class="title">统计</span></div><div class="migao"><svg viewBox="0 0 64 64"><path d="M18 24 12 12l14 5M46 24l6-12-14 5" fill="#f7f8f2" stroke="#1d2730" stroke-width="3"/><path d="M13 34c0-13 8-21 19-21s19 8 19 21-8 18-19 18-19-7-19-18Z" fill="#fff" stroke="#1d2730" stroke-width="3"/><circle cx="25" cy="31" r="3"/><circle cx="39" cy="31" r="3"/><path d="M26 40c4 5 9 5 12 0" fill="none" stroke="#1d2730" stroke-width="3" stroke-linecap="round"/></svg></div></div>
+        <div class="card summary"><div><span>本月支出</span><strong class="expense">¥3127</strong></div><div><span>收入</span><strong class="income">¥0</strong></div><div><span>结余</span><strong>-¥3127</strong></div></div>
+        <div class="card"><b>支出趋势</b><div class="chart"><div class="line"></div><div class="bubble">07.12<br>¥1474</div></div></div>
+        <div class="card list"><div class="row"><span class="icon">🎁</span><div><b>礼品</b><small>6 笔</small></div><b class="expense">¥580</b></div><div class="row"><span class="icon">🚕</span><div><b>交通</b><small>4 笔</small></div><b class="expense">¥230</b></div></div>
+        <div class="nav"><span>⌂<br>首页</span><span>▤<br>账单</span><span class="fab"><i>✎</i>记一笔</span><span>▥<br>统计</span><span>♡<br>我的</span></div>
+      </div>
+    </section>
+    <section class="concept b">
+      <h2>B. 清爽工具风</h2>
+      <p>更像长期使用的效率工具，信息密度高，动画和装饰更克制。</p>
+      <div class="phone">
+        <div class="hero"><div><span class="eyebrow">LOCAL LEDGER</span><span class="title">统计</span></div><span class="eyebrow">2026.07</span></div>
+        <div class="card summary"><div><span>支出</span><strong class="expense">¥3127</strong></div><div><span>收入</span><strong class="income">¥0</strong></div><div><span>结余</span><strong>-¥3127</strong></div></div>
+        <div class="card"><b>趋势</b><div class="chart"><div class="line"></div><div class="bubble">07.12 ¥1474</div></div></div>
+        <div class="card list"><div class="row"><span class="icon">餐</span><div><b>餐饮</b><small>12 笔支出</small></div><b class="expense">¥1280</b></div><div class="row"><span class="icon">行</span><div><b>交通</b><small>4 笔支出</small></div><b class="expense">¥230</b></div></div>
+        <div class="nav"><span>⌂<br>首页</span><span>▤<br>账单</span><span class="fab"><i>✎</i>记一笔</span><span>▥<br>统计</span><span>○<br>我的</span></div>
+      </div>
+    </section>
+    <section class="concept c">
+      <h2>C. 手帐票据风</h2>
+      <p>更接近你参考图，像贴在纸板上的账本，适合“米糕”品牌感。</p>
+      <div class="phone">
+        <div class="hero"><div><span class="eyebrow">默认账本</span><span class="title">统计</span></div><div class="migao">🐕</div></div>
+        <div class="card summary"><div><span>支出</span><strong class="expense">¥3127</strong></div><div><span>收入</span><strong class="income">¥0</strong></div><div><span>结余</span><strong>-¥3127</strong></div></div>
+        <div class="card"><b>支出趋势</b><div class="chart"><div class="line"></div><div class="bubble">07.12<br>¥1474</div></div></div>
+        <div class="card list"><div class="row"><span class="icon">🧋</span><div><b>奶茶</b><small>孙浩铭</small></div><b class="expense">¥30</b></div><div class="row"><span class="icon">🎁</span><div><b>礼品</b><small>7 月 12 日</small></div><b class="expense">¥580</b></div></div>
+        <div class="nav"><span>⌂<br>首页</span><span>▤<br>账单</span><span class="fab"><i>✎</i>记一笔</span><span>▥<br>统计</span><span>♡<br>我的</span></div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

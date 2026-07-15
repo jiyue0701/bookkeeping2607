@@ -1334,6 +1334,14 @@ function rankingStats(monthRecords) {
   })).sort((left, right) => right.amountCents - left.amountCents);
 }
 
+function renderCategoryDetailCard(selected) {
+  return `
+    <section class="paper-card category-detail-card" data-category-detail-card>
+      <div class="section-heading"><div><h2>${escapeHtml(selected.name)}明细</h2><div class="subtle">${selected.records.length} 笔支出 · 合计 ${formatMoney(selected.amountCents)}</div></div><span class="category-icon expense">${escapeHtml(selected.icon)}</span></div>
+      <div class="record-list">${selected.records.map((record) => renderRecordRow(record, true)).join("")}</div>
+    </section>`;
+}
+
 function renderRanking(monthRecords) {
   const stats = rankingStats(monthRecords);
   if (!stats.length) {
@@ -1353,10 +1361,7 @@ function renderRanking(monthRecords) {
           </button>`).join("")}
       </div>
     </section>
-    <section class="paper-card category-detail-card">
-      <div class="section-heading"><div><h2>${escapeHtml(selected.name)}明细</h2><div class="subtle">${selected.records.length} 笔支出 · 合计 ${formatMoney(selected.amountCents)}</div></div><span class="category-icon expense">${escapeHtml(selected.icon)}</span></div>
-      <div class="record-list">${selected.records.map((record) => renderRecordRow(record, true)).join("")}</div>
-    </section>`;
+    ${renderCategoryDetailCard(selected)}`;
 }
 
 function renderQuickStats(monthRecords) {
@@ -1665,7 +1670,15 @@ function updateCalendarSelection(selectedDate) {
 function updateStatsCategory(categoryId) {
   ui.statsCategoryId = categoryId;
   if (ui.tab !== "statistics" || ui.statisticsMode !== "ranking") return false;
-  render();
+  const detailCard = document.querySelector("[data-category-detail-card]");
+  if (!detailCard) return false;
+  const stats = rankingStats(recordsForMonth(ui.monthCursor));
+  const selected = stats.find((item) => item.id === categoryId);
+  if (!selected) return false;
+  document.querySelectorAll(".ranking-item[data-category]").forEach((item) => {
+    item.classList.toggle("selected", item.dataset.category === categoryId);
+  });
+  detailCard.outerHTML = renderCategoryDetailCard(selected);
   return true;
 }
 
