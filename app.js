@@ -1285,7 +1285,7 @@ function renderTrend(monthRecords) {
   const average = Math.round(total / activeDays);
   const lineChart = `
     <div class="trend-chart-shell">
-      <svg class="trend-chart" viewBox="0 0 ${chart.width} ${chart.height}" width="${chart.width}" height="${chart.height}" data-days="${daily.length}" data-chart-left="${chart.left}" data-chart-right="${chart.width - chart.right}" data-view-width="${chart.width}" role="img" aria-label="本月支出趋势折线图">
+      <svg class="trend-chart" viewBox="0 0 ${chart.width} ${chart.height}" width="${chart.width}" height="${chart.height}" data-days="${daily.length}" data-chart-left="${chart.left}" data-chart-right="${chart.width - chart.right}" data-chart-top="${chart.top}" data-chart-base="${baseY}" data-view-width="${chart.width}" role="img" aria-label="本月支出趋势折线图">
         <defs>
           <linearGradient id="trendAreaGradient" x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stop-color="#ff6d82" stop-opacity=".20"></stop>
@@ -1534,8 +1534,64 @@ function activateTrendDay(actionElement) {
 function activateTrendDayData(date, amountCents, toast = false) {
   if (!date || ui.trendSelectedDate === date && !toast) return;
   ui.trendSelectedDate = date;
-  render();
+  if (!updateTrendVisual(date, amountCents)) render();
   if (toast) showToast(`${dayLabel(dateFromKey(date))}：${formatMoney(amountCents)}`);
+}
+
+function setSvgAttributes(element, attrs) {
+  if (!element) return;
+  Object.entries(attrs).forEach(([name, value]) => element.setAttribute(name, String(value)));
+}
+
+function updateTrendVisual(date, amountCents) {
+  const chartElement = document.querySelector(".trend-chart");
+  if (!chartElement) return false;
+  const days = Number(chartElement.dataset.days || 0);
+  const left = Number(chartElement.dataset.chartLeft || 0);
+  const right = Number(chartElement.dataset.chartRight || 0);
+  const top = Number(chartElement.dataset.chartTop || 0);
+  const base = Number(chartElement.dataset.chartBase || 0);
+  const viewWidth = Number(chartElement.dataset.viewWidth || 0);
+  const dateValue = dateFromKey(date);
+  const index = dateValue.getDate() - 1;
+  if (!days || index < 0 || index >= days || right <= left || !viewWidth) return false;
+
+  const stepX = (right - left) / Math.max(days - 1, 1);
+  const pointX = left + stepX * index;
+  const x1 = index === 0 ? left : pointX - stepX / 2;
+  const x2 = index === days - 1 ? right : pointX + stepX / 2;
+  const bandTop = top - 8;
+  const svgNamespace = "http://www.w3.org/2000/svg";
+  let band = chartElement.querySelector(".trend-selected-band");
+  if (!band) {
+    band = document.createElementNS(svgNamespace, "rect");
+    band.classList.add("trend-selected-band");
+    chartElement.insertBefore(band, chartElement.querySelector(".trend-area"));
+  }
+  setSvgAttributes(band, {
+    x: x1.toFixed(1),
+    y: bandTop,
+    width: (x2 - x1).toFixed(1),
+    height: (base - bandTop).toFixed(1),
+    rx: 2
+  });
+
+  const tooltipWidth = 112;
+  const tooltipX = Math.min(Math.max(pointX - tooltipWidth / 2, 8), viewWidth - tooltipWidth - 8);
+  const tooltip = chartElement.querySelector(".trend-tooltip");
+  if (!tooltip) return true;
+  setSvgAttributes(tooltip.querySelector("rect"), { x: tooltipX.toFixed(1), y: 6, width: tooltipWidth, height: 42, rx: 8 });
+  setSvgAttributes(tooltip.querySelector("path"), { d: `M ${pointX.toFixed(1)} 54 l -6 -7 h 12 Z` });
+  const texts = tooltip.querySelectorAll("text");
+  if (texts[0]) {
+    setSvgAttributes(texts[0], { x: (tooltipX + 13).toFixed(1), y: 24 });
+    texts[0].textContent = `${pad(dateValue.getMonth() + 1)}.${pad(dateValue.getDate())}`;
+  }
+  if (texts[1]) {
+    setSvgAttributes(texts[1], { x: (tooltipX + 13).toFixed(1), y: 41 });
+    texts[1].textContent = formatMoney(amountCents);
+  }
+  return true;
 }
 
 function trendDataFromPointer(event) {
