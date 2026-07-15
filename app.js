@@ -1255,6 +1255,18 @@ function renderTrend(monthRecords) {
       <circle class="trend-point ${point.amountCents ? "has-value" : ""}" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="${point.amountCents ? 3.4 : 2.8}"></circle>
     </g>`).join("");
   const selectedPoint = points.find((point) => dateKey(point.date) === ui.trendSelectedDate);
+  const stepX = spanX / Math.max(points.length - 1, 1);
+  const dayZones = points.map((point, index) => {
+    const x1 = index === 0 ? chart.left : point.x - stepX / 2;
+    const x2 = index === points.length - 1 ? chart.width - chart.right : point.x + stepX / 2;
+    return `<rect class="trend-day-zone" data-action="trend-day" data-date="${dateKey(point.date)}" data-amount="${point.amountCents}" x="${x1.toFixed(1)}" y="${chart.top}" width="${(x2 - x1).toFixed(1)}" height="${plotHeight.toFixed(1)}" rx="1.5"></rect>`;
+  }).join("");
+  const selectedBand = selectedPoint ? (() => {
+    const index = points.indexOf(selectedPoint);
+    const x1 = index === 0 ? chart.left : selectedPoint.x - stepX / 2;
+    const x2 = index === points.length - 1 ? chart.width - chart.right : selectedPoint.x + stepX / 2;
+    return `<rect class="trend-selected-band" x="${x1.toFixed(1)}" y="${chart.top}" width="${(x2 - x1).toFixed(1)}" height="${plotHeight.toFixed(1)}" rx="2"></rect>`;
+  })() : "";
   const peak = selectedPoint || points.reduce((best, point) => point.amountCents > best.amountCents ? point : best, points[0]);
   const tooltipWidth = 112;
   const tooltipX = Math.min(Math.max(peak.x - tooltipWidth / 2, 8), chart.width - tooltipWidth - 8);
@@ -1278,10 +1290,12 @@ function renderTrend(monthRecords) {
           </linearGradient>
         </defs>
         ${gridLines}
+        ${selectedBand}
         <path class="trend-area" d="${areaPath}"></path>
         <path class="trend-line" d="${linePath}"></path>
         ${pointNodes}
         ${tooltip}
+        ${dayZones}
         <line class="trend-axis" x1="${chart.left}" y1="${baseY}" x2="${chart.width - chart.right}" y2="${baseY}"></line>
         ${dayLabels}
       </svg>
@@ -1291,7 +1305,7 @@ function renderTrend(monthRecords) {
   return `
     <section class="paper-card stats-card">
       <div class="section-heading"><div><h2>支出趋势</h2><div class="subtle">每天的支出金额</div></div><span class="expense-text" style="font-weight:900;">${formatMoney(total)}</span></div>
-      ${total ? `<div class="chart-wrap">${lineChart}</div><div class="chart-note">整月完整展示 · 点击折线点可看当天金额</div>` : renderEmptyState("还没有支出趋势", "开始记账后，这里会慢慢长出曲线", "📊")}
+      ${total ? `<div class="chart-wrap">${lineChart}</div><div class="chart-note">整月完整展示 · 轻触日期区域可看当天金额</div>` : renderEmptyState("还没有支出趋势", "开始记账后，这里会慢慢长出曲线", "📊")}
     </section>`;
 }
 

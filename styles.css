@@ -362,6 +362,9 @@ h3 { font-size: 16px; }
 .trend-axis-label { fill: var(--muted); font-size: 11px; font-weight: 700; }
 .trend-area { fill: url(#trendAreaGradient); }
 .trend-line { fill: none; stroke: var(--coral); stroke-linecap: round; stroke-linejoin: round; stroke-width: 2.8; }
+.trend-selected-band { fill: rgba(255, 109, 130, .09); }
+.trend-day-zone { fill: transparent; cursor: pointer; pointer-events: all; }
+.trend-day-zone:active { fill: rgba(255, 109, 130, .08); }
 .trend-hit-area { fill: transparent; cursor: pointer; }
 .trend-point { fill: #fff; stroke: #cfd8d5; stroke-width: 1.8; }
 .trend-point.has-value { fill: var(--coral); stroke: #fff; stroke-width: 2.2; }
