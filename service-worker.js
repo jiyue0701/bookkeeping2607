@@ -1,4 +1,4 @@
-const CACHE_NAME = "bookkeeping2607-pwa-v35";
+const CACHE_NAME = "bookkeeping2607-pwa-v36";
 
 const CORE_FILES = [
   "./",

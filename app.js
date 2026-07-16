@@ -1507,14 +1507,15 @@ function renderStatistics() {
   const monthRecords = recordsForMonth(ui.monthCursor);
   return `
     <div class="page statistics-page">
-      <div class="page-title-row"><div><span class="eyebrow">趋势 · 分类</span><h1>统计</h1></div></div>
-      <div class="segmented">
+      <div class="page-title-row"><div><span class="eyebrow">趋势 · 分类 · 复盘</span><h1>统计</h1></div></div>
+      <div class="segmented statistics-segmented">
         <button class="${ui.statisticsMode === "trend" ? "active" : ""}" type="button" data-action="statistics-mode" data-mode="trend">趋势</button>
         <button class="${ui.statisticsMode === "ranking" ? "active" : ""}" type="button" data-action="statistics-mode" data-mode="ranking">排行</button>
+        <button class="${ui.statisticsMode === "monthly" ? "active" : ""}" type="button" data-action="statistics-mode" data-mode="monthly">月报</button>
       </div>
       ${renderMonthSwitcher()}
-      ${ui.statisticsMode === "trend" ? renderTrend(monthRecords) : renderRanking(monthRecords)}
-      ${renderQuickStats(monthRecords)}
+      ${ui.statisticsMode === "trend" ? renderTrend(monthRecords) : ui.statisticsMode === "ranking" ? renderRanking(monthRecords) : renderMonthlyReport(monthRecords)}
+      ${ui.statisticsMode === "monthly" ? "" : renderQuickStats(monthRecords)}
     </div>`;
 }
 
@@ -1636,6 +1637,103 @@ function renderRanking(monthRecords) {
     ${renderCategoryDetailCard(selected)}`;
 }
 
+function renderMonthlyReport(monthRecords) {
+  const totals = monthTotals(monthRecords);
+  const previousTotals = monthTotals(recordsForMonth(addMonths(ui.monthCursor, -1)));
+  const expenseRecords = monthRecords.filter((record) => record.type === "expense");
+  const daily = dailyExpenses(ui.monthCursor);
+  const activeDays = daily.filter((item) => item.amountCents > 0).length;
+  const highestDay = daily.reduce((highest, item) => item.amountCents > (highest?.amountCents || 0) ? item : highest, null);
+  const categoryStats = rankingStats(monthRecords);
+  const topRecords = expenseRecords
+    .slice()
+    .sort((left, right) => right.amountCents - left.amountCents || new Date(right.occurredAt) - new Date(left.occurredAt))
+    .slice(0, 3);
+  const deltaCents = totals.expense - previousTotals.expense;
+  let changeClass = "neutral";
+  let changeText = "暂无上月支出";
+  if (previousTotals.expense === 0) {
+    if (totals.expense > 0) {
+      changeClass = "up";
+      changeText = "较上月新增";
+    }
+  } else if (deltaCents > 0) {
+    changeClass = "up";
+    changeText = `较上月增加 ${formatMoney(deltaCents)}`;
+  } else if (deltaCents < 0) {
+    changeClass = "down";
+    changeText = `较上月减少 ${formatMoney(deltaCents)}`;
+  } else {
+    changeText = "与上月持平";
+  }
+  const activeDayAverage = activeDays ? Math.round(totals.expense / activeDays) : 0;
+  const highestDayLabel = highestDay?.amountCents ? `${dayLabel(highestDay.date)} · ${formatMoney(highestDay.amountCents)}` : "暂无支出";
+  const categoryTotal = totals.expense || 1;
+
+  return `
+    <section class="content-group monthly-report-hero">
+      <div class="monthly-report-heading">
+        <div><span class="eyebrow">月度复盘</span><h2>本月总支出</h2></div>
+        <span class="monthly-report-month">${monthLabel(ui.monthCursor)}</span>
+      </div>
+      <div class="monthly-report-total-row">
+        <strong class="expense-text">${formatMoney(totals.expense)}</strong>
+        <span class="monthly-report-change ${changeClass}">${changeText}</span>
+      </div>
+      <div class="monthly-report-footline"><span>${expenseRecords.length} 笔支出 · ${activeDays} 个活跃日</span><span>结余 ${formatBalance(totals.balance)}</span></div>
+    </section>
+
+    <section class="content-group monthly-insights-group">
+      <div class="section-heading"><div><h2>本月看点</h2><div class="subtle">用几个数字快速读懂这个月</div></div></div>
+      <div class="monthly-insights-grid">
+        <div class="monthly-insight monthly-insight-average">
+          <span class="monthly-insight-icon">${iconMarkup("calendar", "monthly-insight-glyph")}</span>
+          <span>活跃日均</span>
+          <strong class="expense-text">${formatMoney(activeDayAverage)}</strong>
+        </div>
+        <div class="monthly-insight monthly-insight-highest">
+          <span class="monthly-insight-icon">${iconMarkup("arrow-up-circle", "monthly-insight-glyph")}</span>
+          <span>最高支出日</span>
+          <strong>${highestDayLabel}</strong>
+        </div>
+        <div class="monthly-insight monthly-insight-active">
+          <span class="monthly-insight-icon">${iconMarkup("receipt-2", "monthly-insight-glyph")}</span>
+          <span>记账天数</span>
+          <strong>${activeDays} 天</strong>
+        </div>
+        <div class="monthly-insight monthly-insight-count">
+          <span class="monthly-insight-icon">${iconMarkup("tag", "monthly-insight-glyph")}</span>
+          <span>最高分类</span>
+          <strong>${categoryStats[0] ? escapeHtml(categoryStats[0].name) : "暂无分类"}</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="content-group monthly-category-group">
+      <div class="section-heading"><div><h2>花销去向</h2><div class="subtle">按支出金额占比</div></div><span class="small-chip">${categoryStats.length} 类</span></div>
+      ${categoryStats.length ? `<div class="monthly-category-list">${categoryStats.slice(0, 5).map((item) => {
+        const percent = Math.round((item.amountCents / categoryTotal) * 100);
+        return `
+          <div class="monthly-category-row">
+            ${categoryIconMarkup(item.id, "expense")}
+            <div class="monthly-category-main">
+              <div class="monthly-category-top"><strong>${escapeHtml(item.name)}</strong><span>${formatMoney(item.amountCents)} · ${percent}%</span></div>
+              <div class="monthly-category-bar"><span style="width:${Math.min(percent, 100)}%"></span></div>
+            </div>
+          </div>`;
+      }).join("")}</div>` : renderEmptyState("还没有支出分类", "记录几笔支出后，这里会显示花销去向", "tag")}
+    </section>
+
+    <section class="content-group monthly-highlights-group">
+      <div class="section-heading"><div><h2>本月大额支出</h2><div class="subtle">金额最高的 ${topRecords.length || 3} 笔记录</div></div></div>
+      ${topRecords.length ? `<div class="record-list monthly-record-list">${topRecords.map((record) => renderRecordRow(record)).join("")}</div>` : renderEmptyState("还没有大额支出", "本月记录后，这里会帮你留下消费重点", "receipt-2")}
+      <div class="monthly-balance-strip">
+        <span><small>本月收入</small><strong class="income-text">${formatMoney(totals.income)}</strong></span>
+        <span><small>本月结余</small><strong class="${totals.balance < 0 ? "expense-text" : "income-text"}">${formatBalance(totals.balance)}</strong></span>
+      </div>
+    </section>`;
+}
+
 function renderQuickStats(monthRecords) {
   const totals = monthTotals(monthRecords);
   const days = new Date(ui.monthCursor.getFullYear(), ui.monthCursor.getMonth() + 1, 0).getDate();
@@ -1734,7 +1832,7 @@ function renderSettings() {
           <div class="settings-row static-row"><span class="line-icon">${iconMarkup("currency-yuan", "line-glyph")}</span><span><strong>金额格式</strong><small>人民币元，固定保留两位小数</small></span></div>
         </div>
       </section>
-      <footer class="settings-version">米糕记账 v1.6.4 · 轻量、离线、不收费</footer>
+      <footer class="settings-version">米糕记账 v1.6.5 · 轻量、离线、不收费</footer>
     </div>`;
 }
 
