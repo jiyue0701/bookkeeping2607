@@ -55,10 +55,22 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 }
 
 .page { animation: page-in .2s ease-out; }
+.page.page-swipe-next { animation: page-swipe-next .24s cubic-bezier(.22, .72, .28, 1) both; }
+.page.page-swipe-previous { animation: page-swipe-previous .24s cubic-bezier(.22, .72, .28, 1) both; }
 
 @keyframes page-in {
   from { opacity: 1; transform: translateY(5px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes page-swipe-next {
+  from { opacity: .72; transform: translate3d(22px, 0, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+@keyframes page-swipe-previous {
+  from { opacity: .72; transform: translate3d(-22px, 0, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
 }
 
 h1, h2, h3, p { margin: 0; }
@@ -1307,38 +1319,6 @@ summary:focus-visible { outline: 3px solid rgba(39, 187, 165, .25); outline-offs
 .month-switcher { min-height: 48px; margin: 0 0 4px; }
 .month-switcher strong { font-size: 18px; font-weight: 700; }
 .month-switcher button { width: 44px; height: 44px; }
-
-.compact-summary {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 5px;
-  margin: 0 0 18px;
-  padding: 5px;
-  border: 1px solid rgba(20, 79, 69, .07);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, .56);
-}
-.compact-summary-item {
-  display: flex;
-  min-width: 0;
-  min-height: 94px;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 3px;
-  padding: 9px 5px;
-  border-radius: 12px;
-  text-align: center;
-}
-.compact-summary-expense { background: rgba(255, 241, 243, .88); }
-.compact-summary-income { background: rgba(233, 249, 244, .92); }
-.compact-summary-balance { background: rgba(255, 248, 218, .8); }
-.compact-summary-icon { display: grid; width: 28px; height: 28px; place-items: center; margin-bottom: 2px; border-radius: 9px; background: rgba(255, 255, 255, .72); }
-.compact-summary-glyph { width: 16px; height: 16px; opacity: .7; }
-.compact-summary span,
-.compact-summary strong { display: block; white-space: nowrap; }
-.compact-summary-item > span:not(.compact-summary-icon) { color: var(--muted); font-size: 12px; font-weight: 500; }
-.compact-summary strong { max-width: 100%; overflow: hidden; font-size: 13px; font-weight: 700; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 
 .day-card { margin-bottom: 18px; padding: 0 2px; border: 0; border-radius: 0; background: transparent; }
 .day-heading { min-height: 40px; margin: 0 4px 7px; padding: 0; }

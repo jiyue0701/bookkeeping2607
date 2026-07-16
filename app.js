@@ -126,6 +126,7 @@ let records = [];
 let toastTimer = null;
 let trendPointerHandledAt = 0;
 let trendDragActive = false;
+let navigationSwipe = null;
 let autoBackupTimer = null;
 let midnightBackupTimer = null;
 let cloudBackupTimer = null;
@@ -148,6 +149,10 @@ let serviceWorkerControllerBound = false;
 let serviceWorkerSwapPending = false;
 let pendingUndo = null;
 records = loadRecords();
+
+const PRIMARY_TABS = ["home", "ledger", "statistics", "settings"];
+const SWIPE_MIN_DISTANCE = 84;
+const SWIPE_MAX_DURATION = 700;
 
 function categoryObjects(type) {
   return CATEGORY_SETS[type].map(([id, name, icon, group], order) => ({ id, name, icon, group, order }));
@@ -1315,28 +1320,6 @@ function cloudSyncShortText() {
     : "自动同步已开启 · 等待首次同步";
 }
 
-function renderCompactSummary(items, label = "本月") {
-  const totals = monthTotals(items);
-  return `
-    <section class="compact-summary" aria-label="${label}收支摘要">
-      <div class="compact-summary-item compact-summary-expense">
-        <span class="compact-summary-icon">${iconMarkup("wallet", "compact-summary-glyph")}</span>
-        <span>${label}支出</span>
-        <strong class="expense-text">${formatMoney(totals.expense)}</strong>
-      </div>
-      <div class="compact-summary-item compact-summary-income">
-        <span class="compact-summary-icon">${iconMarkup("arrow-up-circle", "compact-summary-glyph")}</span>
-        <span>${label}收入</span>
-        <strong class="income-text">${formatMoney(totals.income)}</strong>
-      </div>
-      <div class="compact-summary-item compact-summary-balance">
-        <span class="compact-summary-icon">${iconMarkup("equal", "compact-summary-glyph")}</span>
-        <span>${label}结余</span>
-        <strong class="${totals.balance < 0 ? "expense-text" : "balance-text"}">${formatBalance(totals.balance)}</strong>
-      </div>
-    </section>`;
-}
-
 function renderRecordRow(record, deletable = false) {
   const meta = TYPE_META[record.type] || TYPE_META.expense;
   const detail = record.note || (record.type === "transfer"
@@ -1459,7 +1442,6 @@ function renderLedger() {
         <button class="${ui.ledgerMode === "calendar" ? "active" : ""}" type="button" data-action="ledger-mode" data-mode="calendar">日历</button>
       </div>
       ${renderMonthSwitcher()}
-      ${renderCompactSummary(monthRecords)}
       ${ui.ledgerMode === "flow" ? renderFlow(monthRecords) : renderCalendar(monthRecords)}
     </div>`;
 }
@@ -1752,7 +1734,7 @@ function renderSettings() {
           <div class="settings-row static-row"><span class="line-icon">${iconMarkup("currency-yuan", "line-glyph")}</span><span><strong>金额格式</strong><small>人民币元，固定保留两位小数</small></span></div>
         </div>
       </section>
-      <footer class="settings-version">米糕记账 v1.6.3 · 轻量、离线、不收费</footer>
+      <footer class="settings-version">米糕记账 v1.6.4 · 轻量、离线、不收费</footer>
     </div>`;
 }
 
@@ -2014,6 +1996,70 @@ function stopTrendPointer() {
   trendDragActive = false;
 }
 
+function navigateToTab(tabName, swipeDirection = 0) {
+  if (!PRIMARY_TABS.includes(tabName)) return false;
+  if (swipeDirection && (ui.modal || ui.helpModal || ui.recordActionId)) return false;
+  if (ui.tab === tabName) return false;
+
+  ui.tab = tabName;
+  render();
+
+  if (swipeDirection) {
+    const page = document.querySelector("#page > .page");
+    const animationClass = swipeDirection > 0 ? "page-swipe-next" : "page-swipe-previous";
+    page?.classList.add(animationClass);
+    window.setTimeout(() => page?.classList.remove(animationClass), 280);
+  }
+  return true;
+}
+
+function swipeTargetIsInteractive(target) {
+  return !!target?.closest?.("button, a, input, select, textarea, summary, [contenteditable='true'], [data-action], [data-tab], .trend-chart, .calendar-grid, [data-no-swipe]");
+}
+
+function handleNavigationTouchStart(event) {
+  if (event.touches.length !== 1 || ui.modal || ui.helpModal || ui.recordActionId || swipeTargetIsInteractive(event.target)) {
+    navigationSwipe = null;
+    return;
+  }
+  const touch = event.touches[0];
+  navigationSwipe = {
+    x: touch.clientX,
+    y: touch.clientY,
+    startedAt: Date.now(),
+    target: event.target
+  };
+}
+
+function handleNavigationTouchEnd(event) {
+  if (!navigationSwipe || event.changedTouches.length !== 1) {
+    navigationSwipe = null;
+    return;
+  }
+
+  const start = navigationSwipe;
+  navigationSwipe = null;
+  const touch = event.changedTouches[0];
+  const deltaX = touch.clientX - start.x;
+  const deltaY = touch.clientY - start.y;
+  const distance = Math.abs(deltaX);
+  const elapsed = Date.now() - start.startedAt;
+  const minDistance = Math.max(SWIPE_MIN_DISTANCE, Math.min(128, Math.round(window.innerWidth * .2)));
+
+  if (swipeTargetIsInteractive(start.target)) return;
+  if (elapsed > SWIPE_MAX_DURATION || distance < minDistance || distance <= Math.abs(deltaY) * 1.35) return;
+
+  const currentIndex = PRIMARY_TABS.indexOf(ui.tab);
+  const direction = deltaX < 0 ? 1 : -1;
+  const nextIndex = currentIndex + direction;
+  if (currentIndex < 0 || nextIndex < 0 || nextIndex >= PRIMARY_TABS.length) return;
+  navigateToTab(PRIMARY_TABS[nextIndex], direction);
+}
+
+function handleNavigationTouchCancel() {
+  navigationSwipe = null;
+}
+
 function updateCalendarSelection(selectedDate) {
   ui.selectedDate = selectedDate;
   const selectedCard = document.querySelector("[data-selected-date-card]");
@@ -2099,8 +2145,7 @@ function saveDraft(event) {
 function handleClick(event) {
   const tab = event.target.closest("[data-tab]");
   if (tab) {
-    ui.tab = tab.dataset.tab;
-    render();
+    navigateToTab(tab.dataset.tab);
     return;
   }
 
@@ -2238,6 +2283,9 @@ function init() {
   document.addEventListener("pointermove", handleTrendPointerMove, { passive: false });
   document.addEventListener("pointerup", stopTrendPointer);
   document.addEventListener("pointercancel", stopTrendPointer);
+  document.addEventListener("touchstart", handleNavigationTouchStart, { passive: true });
+  document.addEventListener("touchend", handleNavigationTouchEnd, { passive: true });
+  document.addEventListener("touchcancel", handleNavigationTouchCancel, { passive: true });
   document.addEventListener("input", handleInput);
   document.addEventListener("change", handleBackupInput);
   document.addEventListener("visibilitychange", () => {
