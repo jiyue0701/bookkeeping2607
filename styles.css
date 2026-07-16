@@ -1310,6 +1310,7 @@ summary:focus-visible { outline: 3px solid rgba(39, 187, 165, .25); outline-offs
 }
 .record-amount { grid-column: 1; grid-row: 1; font-size: 15px; font-weight: 700; }
 .record-time { grid-column: 1; grid-row: 2; color: var(--muted); font-size: 13px; font-weight: 400; }
+.record-time-with-date { white-space: nowrap; }
 .record-more-button { grid-column: 2; grid-row: 1 / 3; width: 44px; height: 44px; border-radius: 12px; background: transparent; }
 .record-more-button .button-glyph { opacity: .58; }
 
@@ -1454,7 +1455,9 @@ summary:focus-visible { outline: 3px solid rgba(39, 187, 165, .25); outline-offs
 .monthly-insight-icon { display: grid; grid-column: 1; grid-row: 1; width: 32px; height: 32px; place-items: center; border-radius: 10px; background: rgba(255, 255, 255, .76); }
 .monthly-insight-glyph { width: 17px; height: 17px; opacity: .68; }
 .monthly-insight > span:not(.monthly-insight-icon) { grid-column: 2; grid-row: 1; overflow: hidden; color: var(--muted); font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
-.monthly-insight strong { grid-column: 1 / 3; grid-row: 2; min-width: 0; overflow: hidden; font-size: 14px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.monthly-insight strong { display: flex; grid-column: 1 / 3; grid-row: 2; align-items: baseline; flex-wrap: wrap; min-width: 0; gap: 3px 7px; overflow: visible; font-size: 14px; font-weight: 700; line-height: 1.3; white-space: normal; font-variant-numeric: tabular-nums; }
+.monthly-insight-date { color: var(--ink); font-size: 12px; font-weight: 600; }
+.monthly-insight-amount { color: var(--coral); font-size: 14px; font-weight: 800; }
 .monthly-category-group { padding-bottom: 13px; }
 .monthly-category-list { display: grid; gap: 14px; }
 .monthly-category-row { display: flex; align-items: center; min-width: 0; gap: 10px; }

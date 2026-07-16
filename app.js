@@ -1320,13 +1320,16 @@ function cloudSyncShortText() {
     : "自动同步已开启 · 等待首次同步";
 }
 
-function renderRecordRow(record, deletable = false) {
+function renderRecordRow(record, deletable = false, options = {}) {
   const meta = TYPE_META[record.type] || TYPE_META.expense;
   const detail = record.note || (record.type === "transfer"
     ? `${record.accountName} → ${record.destinationAccountName}`
     : record.accountName);
   const occurred = new Date(record.occurredAt);
-  const time = `${pad(occurred.getHours())}:${pad(occurred.getMinutes())}`;
+  const time = options.showDate
+    ? `${pad(occurred.getMonth() + 1)}.${pad(occurred.getDate())} ${pad(occurred.getHours())}:${pad(occurred.getMinutes())}`
+    : `${pad(occurred.getHours())}:${pad(occurred.getMinutes())}`;
+  const timeClass = options.showDate ? "record-time record-time-with-date" : "record-time";
   return `
     <div class="record-row">
       <div class="record-main">
@@ -1338,7 +1341,7 @@ function renderRecordRow(record, deletable = false) {
       </div>
       <div class="record-trailing">
         <strong class="record-amount ${meta.className}-text">${formatSigned(record)}</strong>
-        <span class="record-time">${time}</span>
+        <span class="${timeClass}">${time}</span>
         ${deletable ? `<button class="icon-button record-more-button" type="button" data-action="record-more" data-id="${escapeHtml(record.id)}" aria-label="更多账单操作">${iconMarkup("dots", "button-glyph")}</button>` : ""}
       </div>
     </div>`;
@@ -1611,7 +1614,7 @@ function renderCategoryInlineDetails(selected) {
   return `
     <div class="ranking-inline-details" data-category-detail-card>
       <div class="ranking-inline-heading"><div>${categoryIconMarkup(selected.id, "expense")}<span><strong>${escapeHtml(selected.name)}明细</strong><small>${selected.records.length} 笔支出 · 合计 ${formatMoney(selected.amountCents)}</small></span></div><button class="ranking-inline-close" type="button" data-action="stats-category" data-category="${escapeHtml(selected.id)}">收起</button></div>
-      <div class="record-list">${selected.records.map((record) => renderRecordRow(record, true)).join("")}</div>
+      <div class="record-list">${selected.records.map((record) => renderRecordRow(record, true, { showDate: true })).join("")}</div>
     </div>`;
 }
 
@@ -1755,7 +1758,9 @@ function renderMonthlyReport(monthRecords) {
     changeText = "与上月持平";
   }
   const activeDayAverage = activeDays ? Math.round(totals.expense / activeDays) : 0;
-  const highestDayLabel = highestDay?.amountCents ? `${dayLabel(highestDay.date)} · ${formatMoney(highestDay.amountCents)}` : "暂无支出";
+  const highestDayLabel = highestDay?.amountCents
+    ? `<span class="monthly-insight-date">${dayLabel(highestDay.date)}</span><span class="monthly-insight-amount">${formatMoney(highestDay.amountCents)}</span>`
+    : "暂无支出";
   const categoryTotal = totals.expense || 1;
   const isCurrentMonth = sameMonth(ui.monthCursor, new Date());
   const periodLabel = isCurrentMonth ? "本月" : `${ui.monthCursor.getMonth() + 1}月`;
@@ -1819,7 +1824,7 @@ function renderMonthlyReport(monthRecords) {
 
     <section class="content-group monthly-highlights-group">
       <div class="section-heading"><div><h2>${periodLabel}大额支出</h2><div class="subtle">金额最高的 ${topRecords.length || 3} 笔记录</div></div></div>
-      ${topRecords.length ? `<div class="record-list monthly-record-list">${topRecords.map((record) => renderRecordRow(record)).join("")}</div>` : renderEmptyState("还没有大额支出", `${periodLabel}记录后，这里会帮你留下消费重点`, "receipt-2")}
+      ${topRecords.length ? `<div class="record-list monthly-record-list">${topRecords.map((record) => renderRecordRow(record, false, { showDate: true })).join("")}</div>` : renderEmptyState("还没有大额支出", `${periodLabel}记录后，这里会帮你留下消费重点`, "receipt-2")}
       <div class="monthly-balance-strip">
         <span><small>${periodLabel}收入</small><strong class="income-text">${formatMoney(totals.income)}</strong></span>
         <span><small>${periodLabel}结余</small><strong class="${totals.balance < 0 ? "expense-text" : "income-text"}">${formatBalance(totals.balance)}</strong></span>
@@ -1926,7 +1931,7 @@ function renderSettings() {
           <div class="settings-row static-row"><span class="line-icon">${iconMarkup("currency-yuan", "line-glyph")}</span><span><strong>金额格式</strong><small>人民币元，固定保留两位小数</small></span></div>
         </div>
       </section>
-      <footer class="settings-version">米糕记账 v1.6.6 · 轻量、离线、不收费</footer>
+      <footer class="settings-version">米糕记账 v1.6.7 · 轻量、离线、不收费</footer>
     </div>`;
 }
 
