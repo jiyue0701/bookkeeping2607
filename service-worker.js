@@ -1,4 +1,4 @@
-const CACHE_NAME = "bookkeeping2607-pwa-v31";
+const CACHE_NAME = "bookkeeping2607-pwa-v33";
 const ICON_FILES = [
   "apple.svg", "arrow-back-up.svg", "arrow-up-circle.svg", "book-2.svg", "bottle.svg",
   "briefcase.svg", "building-cottage.svg", "calendar.svg", "camera.svg", "car.svg",

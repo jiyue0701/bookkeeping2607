@@ -1204,9 +1204,21 @@ function renderCompactSummary(items, label = "本月") {
   const totals = monthTotals(items);
   return `
     <section class="compact-summary" aria-label="${label}收支摘要">
-      <div><span>${label}支出</span><strong class="expense-text">${formatMoney(totals.expense)}</strong></div>
-      <div><span>${label}收入</span><strong class="income-text">${formatMoney(totals.income)}</strong></div>
-      <div><span>${label}结余</span><strong>${formatBalance(totals.balance)}</strong></div>
+      <div class="compact-summary-item compact-summary-expense">
+        <span class="compact-summary-icon">${iconMarkup("wallet", "compact-summary-glyph")}</span>
+        <span>${label}支出</span>
+        <strong class="expense-text">${formatMoney(totals.expense)}</strong>
+      </div>
+      <div class="compact-summary-item compact-summary-income">
+        <span class="compact-summary-icon">${iconMarkup("arrow-up-circle", "compact-summary-glyph")}</span>
+        <span>${label}收入</span>
+        <strong class="income-text">${formatMoney(totals.income)}</strong>
+      </div>
+      <div class="compact-summary-item compact-summary-balance">
+        <span class="compact-summary-icon">${iconMarkup("equal", "compact-summary-glyph")}</span>
+        <span>${label}结余</span>
+        <strong class="${totals.balance < 0 ? "expense-text" : "balance-text"}">${formatBalance(totals.balance)}</strong>
+      </div>
     </section>`;
 }
 
@@ -1304,7 +1316,7 @@ function renderHome() {
 function renderLedger() {
   const monthRecords = recordsForMonth(ui.monthCursor);
   return `
-    <div class="page">
+    <div class="page ledger-page">
       <div class="page-title-row">
         <div><span class="eyebrow">流水 · 日历</span><h1>账单</h1></div>
         <button class="round-button" type="button" data-action="add" aria-label="记一笔">${iconMarkup("plus", "button-glyph")}</button>
@@ -1336,7 +1348,10 @@ function renderFlow(monthRecords) {
     const expense = sumCents(dayRecords, "expense");
     return `
       <section class="content-group day-card">
-        <div class="day-heading"><strong>${dayLabel(date)}</strong><span>支出 ${formatMoney(expense)}</span></div>
+        <div class="day-heading">
+          <div class="day-heading-copy">${iconMarkup("calendar", "day-heading-glyph")}<strong>${dayLabel(date)}</strong></div>
+          <span class="day-total">支出 ${formatMoney(expense)}</span>
+        </div>
         <div class="record-list">${dayRecords.map((record) => renderRecordRow(record, true)).join("")}</div>
       </section>`;
   }).join("");
@@ -1376,7 +1391,7 @@ function renderCalendar(monthRecords) {
 function renderStatistics() {
   const monthRecords = recordsForMonth(ui.monthCursor);
   return `
-    <div class="page">
+    <div class="page statistics-page">
       <div class="page-title-row"><div><span class="eyebrow">趋势 · 分类</span><h1>统计</h1></div></div>
       <div class="segmented">
         <button class="${ui.statisticsMode === "trend" ? "active" : ""}" type="button" data-action="statistics-mode" data-mode="trend">趋势</button>
@@ -1450,12 +1465,12 @@ function renderTrend(monthRecords) {
         <line class="trend-axis" x1="${chart.left}" y1="${baseY}" x2="${chart.width - chart.right}" y2="${baseY}"></line>
         ${dayLabels}
       </svg>
-      <div class="trend-summary">本月已产生 <strong>${expenseCount}</strong> 笔支出，活跃日均 <strong>${formatMoney(average)}</strong></div>
+      <div class="trend-summary"><strong>${expenseCount}</strong> 笔支出 · 活跃日均 <strong>${formatMoney(average)}</strong></div>
     </div>`;
 
   return `
     <section class="content-group stats-card chart-primary-card">
-      <div class="section-heading"><div><h2>每日支出</h2><div class="subtle">每天合计 · 轻触或拖动查看</div></div><span class="expense-text stats-total">${formatMoney(total)}</span></div>
+      <div class="section-heading"><div><h2>每日支出</h2><div class="subtle">轻触或拖动查看每天合计</div></div><span class="expense-text stats-total">${formatMoney(total)}</span></div>
       ${total ? `<div class="chart-wrap">${barChart}</div>` : renderEmptyState("还没有支出趋势", "开始记账后，这里会出现每日柱形图", "chart-bar")}
     </section>`;
 }
@@ -1511,13 +1526,31 @@ function renderQuickStats(monthRecords) {
   const days = new Date(ui.monthCursor.getFullYear(), ui.monthCursor.getMonth() + 1, 0).getDate();
   const expenses = monthRecords.filter((record) => record.type === "expense");
   const highest = expenses.reduce((max, record) => Math.max(max, record.amountCents), 0);
+  const activeDays = new Set(monthRecords.map((record) => dateKey(new Date(record.occurredAt)))).size;
   return `
     <section class="content-group quick-stats-group">
-      <div class="section-heading"><div><h2>本月速览</h2><div class="subtle">共 ${monthRecords.length} 笔记录</div></div></div>
-      <div class="quick-list">
-        <div class="quick-row"><span>平均每天支出</span><strong>${formatMoney(Math.round(totals.expense / Math.max(days, 1)))}</strong></div>
-        <div class="quick-row"><span>最高单笔支出</span><strong>${formatMoney(highest)}</strong></div>
-        <div class="quick-row"><span>本月结余</span><strong>${formatBalance(totals.balance)}</strong></div>
+      <div class="section-heading"><div><h2>本月速览</h2><div class="subtle">共 ${monthRecords.length} 笔记录 · ${activeDays} 个记账日</div></div></div>
+      <div class="quick-stats-grid">
+        <div class="quick-stat-tile quick-stat-average">
+          <span class="quick-stat-icon">${iconMarkup("calendar", "quick-stat-glyph")}</span>
+          <span>日均支出</span>
+          <strong class="expense-text">${formatMoney(Math.round(totals.expense / Math.max(days, 1)))}</strong>
+        </div>
+        <div class="quick-stat-tile quick-stat-highest">
+          <span class="quick-stat-icon">${iconMarkup("arrow-up-circle", "quick-stat-glyph")}</span>
+          <span>最高单笔</span>
+          <strong class="expense-text">${formatMoney(highest)}</strong>
+        </div>
+        <div class="quick-stat-tile quick-stat-active">
+          <span class="quick-stat-icon">${iconMarkup("receipt-2", "quick-stat-glyph")}</span>
+          <span>活跃记账</span>
+          <strong>${activeDays} 天</strong>
+        </div>
+        <div class="quick-stat-tile quick-stat-balance">
+          <span class="quick-stat-icon">${iconMarkup("wallet", "quick-stat-glyph")}</span>
+          <span>本月结余</span>
+          <strong class="${totals.balance < 0 ? "expense-text" : "income-text"}">${formatBalance(totals.balance)}</strong>
+        </div>
       </div>
     </section>`;
 }
@@ -1586,7 +1619,7 @@ function renderSettings() {
           <div class="settings-row static-row"><span class="line-icon">${iconMarkup("currency-yuan", "line-glyph")}</span><span><strong>金额格式</strong><small>人民币元，固定保留两位小数</small></span></div>
         </div>
       </section>
-      <footer class="settings-version">米糕记账 v1.6.1 · 轻量、离线、不收费</footer>
+      <footer class="settings-version">米糕记账 v1.6.2 · 轻量、离线、不收费</footer>
     </div>`;
 }
 
@@ -1611,7 +1644,7 @@ function renderAddModal() {
             </div>
             <section class="form-group amount-card">
               <div class="amount-label">金额（元）</div>
-              <div class="amount-entry"><em class="${meta.className}-text">¥</em><input data-draft-field="amountText" inputmode="decimal" autocomplete="off" placeholder="0.00" value="${escapeHtml(draft.amountText)}" aria-label="金额"></div>
+              <div class="amount-entry"><em class="${meta.className}-text">¥</em><input type="text" data-draft-field="amountText" inputmode="decimal" enterkeyhint="done" autocomplete="off" placeholder="0.00" value="${escapeHtml(draft.amountText)}" aria-label="金额"></div>
             </section>
             <section class="form-group note-form-group">
               <div class="field"><label for="record-note">备注</label><textarea id="record-note" data-draft-field="note" placeholder="例如：午餐、打车上班">${escapeHtml(draft.note)}</textarea></div>
@@ -1717,7 +1750,12 @@ function openAddModal() {
   ui.showAllCategories = false;
   ui.showMoreOptions = false;
   render();
-  window.setTimeout(() => document.querySelector('[data-draft-field="amountText"]')?.focus(), 50);
+  const amountInput = document.querySelector('[data-draft-field="amountText"]');
+  if (amountInput) {
+    amountInput.focus({ preventScroll: true });
+    const caretPosition = amountInput.value.length;
+    amountInput.setSelectionRange?.(caretPosition, caretPosition);
+  }
 }
 
 function closeModal() {
