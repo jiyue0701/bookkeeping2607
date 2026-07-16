@@ -112,7 +112,10 @@ const ui = {
   statsCategoryId: null,
   modal: false,
   helpModal: false,
+  recordActionId: null,
   quickEntry: false,
+  showAllCategories: false,
+  showMoreOptions: false,
   draft: null
 };
 
@@ -139,6 +142,7 @@ let mascotReactionTimer = null;
 let mascotEntryPending = true;
 let serviceWorkerControllerBound = false;
 let serviceWorkerSwapPending = false;
+let pendingUndo = null;
 records = loadRecords();
 
 function categoryObjects(type) {
@@ -1125,7 +1129,10 @@ function openQuickEntryFromURL() {
   ui.draft = draft;
   ui.modal = true;
   ui.helpModal = false;
+  ui.recordActionId = null;
   ui.quickEntry = true;
+  ui.showAllCategories = false;
+  ui.showMoreOptions = false;
 
   const cleanURL = new URL(window.location.href);
   ["quick", "type", "category", "note", "account"].forEach((key) => cleanURL.searchParams.delete(key));
@@ -1172,11 +1179,44 @@ function renderMonthSwitcher() {
     </div>`;
 }
 
+function autoBackupShortText() {
+  if (!autoBackupStatus.supported) return "当前浏览器不支持自动快照";
+  if (!autoBackupStatus.available) return "已开启 · 保存账单后自动更新";
+  return `最近 ${backupTimeLabel(autoBackupStatus.savedAt)} · ${autoBackupStatus.recordCount} 笔`;
+}
+
+function manualBackupShortText() {
+  if (!records.length) return "暂无账单 · 使用后可随时导出";
+  if (!lastManualBackupAt) return "尚未生成 · 建议首次使用先备份";
+  return `上次导出 ${backupTimeLabel(lastManualBackupAt)}`;
+}
+
+function cloudSyncShortText() {
+  if (cloudSyncStatus) return cloudSyncStatus;
+  if (!cloudSyncConfig) return "未开启 · 开启后自动合并与上传";
+  if (cloudSyncConfig.identityVersion !== 2) return "旧版配置 · 建议重新开启";
+  return cloudSyncConfig.lastUploadedAt
+    ? `已开启 · 上次同步 ${backupTimeLabel(cloudSyncConfig.lastUploadedAt)}`
+    : "已开启 · 等待首次同步";
+}
+
+function renderCompactSummary(items, label = "本月") {
+  const totals = monthTotals(items);
+  return `
+    <section class="compact-summary" aria-label="${label}收支摘要">
+      <div><span>${label}支出</span><strong class="expense-text">${formatMoney(totals.expense)}</strong></div>
+      <div><span>${label}收入</span><strong class="income-text">${formatMoney(totals.income)}</strong></div>
+      <div><span>${label}结余</span><strong>${formatBalance(totals.balance)}</strong></div>
+    </section>`;
+}
+
 function renderRecordRow(record, deletable = false) {
   const meta = TYPE_META[record.type] || TYPE_META.expense;
   const detail = record.note || (record.type === "transfer"
     ? `${record.accountName} → ${record.destinationAccountName}`
     : record.accountName);
+  const occurred = new Date(record.occurredAt);
+  const time = `${pad(occurred.getHours())}:${pad(occurred.getMinutes())}`;
   return `
     <div class="record-row">
       <div class="record-main">
@@ -1186,9 +1226,10 @@ function renderRecordRow(record, deletable = false) {
           <span>${escapeHtml(detail)}</span>
         </div>
       </div>
-      <div class="row-between" style="justify-content:flex-end; flex:0 0 auto;">
+      <div class="record-trailing">
         <strong class="record-amount ${meta.className}-text">${formatSigned(record)}</strong>
-        ${deletable ? `<button class="icon-button danger" type="button" data-action="delete-record" data-id="${escapeHtml(record.id)}" aria-label="删除记录">${iconMarkup("trash", "button-glyph")}</button>` : ""}
+        <span class="record-time">${time}</span>
+        ${deletable ? `<button class="icon-button record-more-button" type="button" data-action="record-more" data-id="${escapeHtml(record.id)}" aria-label="更多账单操作">${iconMarkup("dots", "button-glyph")}</button>` : ""}
       </div>
     </div>`;
 }
@@ -1242,28 +1283,20 @@ function renderHome() {
         <button class="home-summary-footer" type="button" data-tab="ledger"><span>本月记录 <strong>${monthRecords.length}</strong> 笔</span>${iconMarkup("chevron-right", "chevron-glyph")}</button>
       </section>
 
-      <button class="home-primary-action" type="button" data-action="add">
-        <span class="home-primary-icon" aria-hidden="true">${iconMarkup("pencil", "primary-glyph")}</span>
-        <span>记一笔</span>
-      </button>
-
-      <section class="paper-card receipt-card">
+      <section class="content-group receipt-card">
         <div class="summary-heading today-heading"><strong>今日记录</strong><span class="today-date">${dateKey(today).replace(/-/g, ".")} ${iconMarkup("calendar", "calendar-glyph")}</span></div>
-        ${todayRecords.length ? `<div class="record-list">${todayRecords.slice(0, 3).map((record) => renderRecordRow(record)).join("")}</div>` : renderEmptyState("今天还没有记录", "点下面的铅笔，记下第一笔吧", "pencil")}
+        ${todayRecords.length ? `<div class="record-list">${todayRecords.slice(0, 2).map((record) => renderRecordRow(record)).join("")}</div>` : renderEmptyState("今天还没有记录", "点右下角“记一笔”开始记录", "pencil")}
         <div class="receipt-footer">
           <button class="home-records-link" type="button" data-tab="ledger">查看全部记录 ${iconMarkup("chevron-right", "chevron-glyph")}</button>
           <div class="receipt-total"><span>今日支出</span><strong class="expense-text">${formatMoney(todayExpense)}</strong></div>
         </div>
       </section>
 
-      <section class="paper-card migao-reminder-card">
-        <div class="section-heading"><div><h2>米糕小贴士</h2><div class="subtle">账单保存在这台设备的浏览器里</div></div><span class="reminder-mark" aria-hidden="true">${iconMarkup("paw", "reminder-glyph")}</span></div>
-        <p class="subtle reminder-copy">长期使用请固定从主屏幕 Web App 打开，并定期在“我的 → 数据管理”导出 JSON 备份。网页更新不会清空账单，但清除网站数据或换设备会丢失本机数据。</p>
-        <div class="home-help-row">
-          <span class="offline-chip">${iconMarkup("database", "chip-glyph")} 离线可用</span>
-          <button class="small-chip home-install-button" type="button" data-action="help">怎么安装到 iPhone？</button>
-        </div>
-      </section>
+      <button class="home-tip-row" type="button" data-tab="settings">
+        <span class="home-tip-icon" aria-hidden="true">${iconMarkup("paw", "reminder-glyph")}</span>
+        <span><strong>米糕小贴士</strong><small>离线可用 · 数据与安装说明</small></span>
+        ${iconMarkup("chevron-right", "chevron-glyph")}
+      </button>
 
     </div>`;
 }
@@ -1281,14 +1314,14 @@ function renderLedger() {
         <button class="${ui.ledgerMode === "calendar" ? "active" : ""}" type="button" data-action="ledger-mode" data-mode="calendar">日历</button>
       </div>
       ${renderMonthSwitcher()}
-      ${renderSummary(monthRecords)}
+      ${renderCompactSummary(monthRecords)}
       ${ui.ledgerMode === "flow" ? renderFlow(monthRecords) : renderCalendar(monthRecords)}
     </div>`;
 }
 
 function renderFlow(monthRecords) {
   if (!monthRecords.length) {
-    return `<section class="paper-card">${renderEmptyState("这个月还没有记录", "点右上角的加号，开始记账吧", "receipt-2")}</section>`;
+    return `<section class="content-group empty-group">${renderEmptyState("这个月还没有记录", "点右下角“记一笔”开始记录", "receipt-2")}</section>`;
   }
 
   const groups = new Map();
@@ -1302,7 +1335,7 @@ function renderFlow(monthRecords) {
     const date = dateFromKey(key);
     const expense = sumCents(dayRecords, "expense");
     return `
-      <section class="paper-card day-card">
+      <section class="content-group day-card">
         <div class="day-heading"><strong>${dayLabel(date)}</strong><span>支出 ${formatMoney(expense)}</span></div>
         <div class="record-list">${dayRecords.map((record) => renderRecordRow(record, true)).join("")}</div>
       </section>`;
@@ -1312,7 +1345,7 @@ function renderFlow(monthRecords) {
 function renderSelectedDateCard(selectedKey) {
   const selectedRecords = recordsForDay(selectedKey);
   return `
-    <section class="paper-card selected-date-card" data-selected-date-card>
+    <section class="content-group selected-date-card" data-selected-date-card>
       <div class="section-heading"><div><h2>${dayLabel(dateFromKey(selectedKey))}</h2><div class="subtle">当天记录</div></div><span class="small-chip">${selectedRecords.length} 笔</span></div>
       ${selectedRecords.length ? `<div class="record-list">${selectedRecords.map((record) => renderRecordRow(record, true)).join("")}</div>` : renderEmptyState("这一天还没有记录", "选择其他日期，或直接记一笔", "sun")}
     </section>`;
@@ -1333,7 +1366,7 @@ function renderCalendar(monthRecords) {
   }).join("");
 
   return `
-    <section class="paper-card calendar-card">
+    <section class="content-group calendar-card">
       <div class="weekdays">${WEEKDAYS.map((weekday) => `<span>${weekday}</span>`).join("")}</div>
       <div class="calendar-grid">${cells}</div>
     </section>
@@ -1344,13 +1377,12 @@ function renderStatistics() {
   const monthRecords = recordsForMonth(ui.monthCursor);
   return `
     <div class="page">
-      <div class="page-title-row"><div><span class="eyebrow">趋势 · 分类</span><h1>统计</h1></div><span class="small-chip">本地计算</span></div>
+      <div class="page-title-row"><div><span class="eyebrow">趋势 · 分类</span><h1>统计</h1></div></div>
       <div class="segmented">
         <button class="${ui.statisticsMode === "trend" ? "active" : ""}" type="button" data-action="statistics-mode" data-mode="trend">趋势</button>
         <button class="${ui.statisticsMode === "ranking" ? "active" : ""}" type="button" data-action="statistics-mode" data-mode="ranking">排行</button>
       </div>
       ${renderMonthSwitcher()}
-      ${renderSummary(monthRecords)}
       ${ui.statisticsMode === "trend" ? renderTrend(monthRecords) : renderRanking(monthRecords)}
       ${renderQuickStats(monthRecords)}
     </div>`;
@@ -1370,19 +1402,19 @@ function renderTrend(monthRecords) {
   const daily = dailyExpenses(ui.monthCursor);
   const max = Math.max(...daily.map((item) => item.amountCents), 1);
   const total = sumCents(monthRecords, "expense");
-  const chart = { width: 360, height: 210, left: 8, right: 8, top: 54, bottom: 34 };
+  const chart = { width: 360, height: 216, left: 12, right: 12, top: 54, bottom: 34 };
   const baseY = chart.height - chart.bottom;
   const plotHeight = baseY - chart.top;
   const spanX = chart.width - chart.left - chart.right;
+  const slotWidth = spanX / daily.length;
+  const barWidth = Math.max(5, Math.min(8, slotWidth * .66));
   const points = daily.map((item, index) => {
-    const x = chart.left + (spanX * index) / Math.max(daily.length - 1, 1);
-    const y = baseY - (item.amountCents / max) * plotHeight;
-    return { ...item, x, y };
+    const x = chart.left + slotWidth * index + slotWidth / 2;
+    const height = item.amountCents ? Math.max(5, (item.amountCents / max) * plotHeight) : 2;
+    return { ...item, x, y: baseY - height, height };
   });
   const lastPoint = points[points.length - 1];
-  const linePath = points.map((point, index) => `${index ? "L" : "M"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ");
-  const areaPath = `M ${chart.left} ${baseY} ${points.map((point) => `L ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ")} L ${lastPoint.x.toFixed(1)} ${baseY} Z`;
-  const gridLines = [0, 0.25, 0.5, 0.75, 1].map((ratio) => {
+  const gridLines = [.33, .66].map((ratio) => {
     const y = chart.top + plotHeight * ratio;
     return `<line class="trend-grid-line" x1="${chart.left}" y1="${y.toFixed(1)}" x2="${chart.width - chart.right}" y2="${y.toFixed(1)}"></line>`;
   }).join("");
@@ -1393,64 +1425,38 @@ function renderTrend(monthRecords) {
     })
     .map((point) => `<text class="trend-axis-label" x="${point.x.toFixed(1)}" y="${chart.height - 12}" text-anchor="middle">${pad(point.date.getDate())}</text>`)
     .join("");
-  const pointNodes = points.map((point) => `
-    <g class="trend-point-hit" data-action="trend-day" data-date="${dateKey(point.date)}" data-amount="${point.amountCents}" role="button" aria-label="${dayLabel(point.date)} ${formatMoney(point.amountCents)}">
-      <circle class="trend-hit-area" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="7"></circle>
-      <circle class="trend-point ${point.amountCents ? "has-value" : ""}" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="${point.amountCents ? 3.4 : 2.8}"></circle>
-    </g>`).join("");
   const selectedPoint = points.find((point) => dateKey(point.date) === ui.trendSelectedDate);
-  const stepX = spanX / Math.max(points.length - 1, 1);
-  const dayZones = points.map((point, index) => {
-    const x1 = index === 0 ? chart.left : point.x - stepX / 2;
-    const x2 = index === points.length - 1 ? chart.width - chart.right : point.x + stepX / 2;
-    return `<rect class="trend-day-zone" data-action="trend-day" data-date="${dateKey(point.date)}" data-amount="${point.amountCents}" x="${x1.toFixed(1)}" y="${chart.top}" width="${(x2 - x1).toFixed(1)}" height="${plotHeight.toFixed(1)}" rx="1.5"></rect>`;
-  }).join("");
-  const selectedBand = selectedPoint ? (() => {
-    const index = points.indexOf(selectedPoint);
-    const x1 = index === 0 ? chart.left : selectedPoint.x - stepX / 2;
-    const x2 = index === points.length - 1 ? chart.width - chart.right : selectedPoint.x + stepX / 2;
-    const bandTop = chart.top - 8;
-    return `<rect class="trend-selected-band" x="${x1.toFixed(1)}" y="${bandTop}" width="${(x2 - x1).toFixed(1)}" height="${(baseY - bandTop).toFixed(1)}" rx="2"></rect>`;
-  })() : "";
-  const peak = selectedPoint || points.reduce((best, point) => point.amountCents > best.amountCents ? point : best, points[0]);
+  const bars = points.map((point) => `
+    <rect class="trend-bar ${point.amountCents ? "has-value" : "is-zero"} ${selectedPoint === point ? "selected" : ""}" data-date="${dateKey(point.date)}" x="${(point.x - barWidth / 2).toFixed(1)}" y="${point.y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${point.height.toFixed(1)}" rx="${(barWidth / 2).toFixed(1)}"></rect>`).join("");
+  const tooltipPoint = selectedPoint || points[0];
   const tooltipWidth = 112;
-  const tooltipX = Math.min(Math.max(peak.x - tooltipWidth / 2, 8), chart.width - tooltipWidth - 8);
+  const tooltipX = Math.min(Math.max(tooltipPoint.x - tooltipWidth / 2, 8), chart.width - tooltipWidth - 8);
   const tooltip = `
-    <g class="trend-tooltip">
+    <g class="trend-tooltip ${selectedPoint ? "visible" : ""}">
       <rect x="${tooltipX.toFixed(1)}" y="6" width="${tooltipWidth}" height="42" rx="8"></rect>
-      <path d="M ${peak.x.toFixed(1)} 54 l -6 -7 h 12 Z"></path>
-      <text x="${(tooltipX + 13).toFixed(1)}" y="24">${pad(peak.date.getMonth() + 1)}.${pad(peak.date.getDate())}</text>
-      <text class="trend-tooltip-amount" x="${(tooltipX + 13).toFixed(1)}" y="41">${formatMoney(peak.amountCents)}</text>
+      <path d="M ${tooltipPoint.x.toFixed(1)} 54 l -6 -7 h 12 Z"></path>
+      <text x="${(tooltipX + 13).toFixed(1)}" y="24">${pad(tooltipPoint.date.getMonth() + 1)}.${pad(tooltipPoint.date.getDate())}</text>
+      <text class="trend-tooltip-amount" x="${(tooltipX + 13).toFixed(1)}" y="41">${formatMoney(tooltipPoint.amountCents)}</text>
     </g>`;
   const expenseCount = monthRecords.filter((record) => record.type === "expense").length;
   const activeDays = daily.filter((item) => item.amountCents > 0).length || 1;
   const average = Math.round(total / activeDays);
-  const lineChart = `
+  const barChart = `
     <div class="trend-chart-shell">
-      <svg class="trend-chart" viewBox="0 0 ${chart.width} ${chart.height}" width="${chart.width}" height="${chart.height}" data-days="${daily.length}" data-chart-left="${chart.left}" data-chart-right="${chart.width - chart.right}" data-chart-top="${chart.top}" data-chart-base="${baseY}" data-view-width="${chart.width}" role="img" aria-label="本月支出趋势折线图">
-        <defs>
-          <linearGradient id="trendAreaGradient" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stop-color="#ff6d82" stop-opacity=".20"></stop>
-            <stop offset="100%" stop-color="#ff6d82" stop-opacity="0"></stop>
-          </linearGradient>
-        </defs>
+      <svg class="trend-chart" viewBox="0 0 ${chart.width} ${chart.height}" width="${chart.width}" height="${chart.height}" data-days="${daily.length}" data-chart-left="${chart.left}" data-chart-right="${chart.width - chart.right}" data-chart-top="${chart.top}" data-chart-base="${baseY}" data-view-width="${chart.width}" role="img" aria-label="本月每日支出柱形图">
         ${gridLines}
-        ${selectedBand}
-        <path class="trend-area" d="${areaPath}"></path>
-        <path class="trend-line" d="${linePath}"></path>
-        ${pointNodes}
+        ${bars}
         ${tooltip}
         <line class="trend-axis" x1="${chart.left}" y1="${baseY}" x2="${chart.width - chart.right}" y2="${baseY}"></line>
         ${dayLabels}
-        ${dayZones}
       </svg>
       <div class="trend-summary">本月已产生 <strong>${expenseCount}</strong> 笔支出，活跃日均 <strong>${formatMoney(average)}</strong></div>
     </div>`;
 
   return `
-    <section class="paper-card stats-card">
-      <div class="section-heading"><div><h2>支出趋势</h2><div class="subtle">每天的支出金额</div></div><span class="expense-text" style="font-weight:900;">${formatMoney(total)}</span></div>
-      ${total ? `<div class="chart-wrap">${lineChart}</div><div class="chart-note">整月完整展示 · 轻触日期区域可看当天金额</div>` : renderEmptyState("还没有支出趋势", "开始记账后，这里会慢慢长出曲线", "chart-bar")}
+    <section class="content-group stats-card chart-primary-card">
+      <div class="section-heading"><div><h2>每日支出</h2><div class="subtle">每天合计 · 轻触或拖动查看</div></div><span class="expense-text stats-total">${formatMoney(total)}</span></div>
+      ${total ? `<div class="chart-wrap">${barChart}</div>` : renderEmptyState("还没有支出趋势", "开始记账后，这里会出现每日柱形图", "chart-bar")}
     </section>`;
 }
 
@@ -1472,7 +1478,7 @@ function rankingStats(monthRecords) {
 
 function renderCategoryDetailCard(selected) {
   return `
-    <section class="paper-card category-detail-card" data-category-detail-card>
+    <section class="content-group category-detail-card" data-category-detail-card>
       <div class="section-heading"><div><h2>${escapeHtml(selected.name)}明细</h2><div class="subtle">${selected.records.length} 笔支出 · 合计 ${formatMoney(selected.amountCents)}</div></div>${categoryIconMarkup(selected.id, "expense")}</div>
       <div class="record-list">${selected.records.map((record) => renderRecordRow(record, true)).join("")}</div>
     </section>`;
@@ -1481,13 +1487,13 @@ function renderCategoryDetailCard(selected) {
 function renderRanking(monthRecords) {
   const stats = rankingStats(monthRecords);
   if (!stats.length) {
-    return `<section class="paper-card">${renderEmptyState("还没有分类排行", "记录几笔支出后，就能看到消费去向", "tag")}</section>`;
+    return `<section class="content-group empty-group">${renderEmptyState("还没有分类排行", "记录几笔支出后，就能看到消费去向", "tag")}</section>`;
   }
   const max = stats[0].amountCents || 1;
   const selected = stats.find((item) => item.id === ui.statsCategoryId) || stats[0];
   ui.statsCategoryId = selected.id;
   return `
-    <section class="paper-card stats-card">
+    <section class="content-group stats-card">
       <div class="section-heading"><div><h2>分类排行</h2><div class="subtle">按支出金额从高到低</div></div><span class="small-chip">${stats.length} 类</span></div>
       <div class="ranking-list">
         ${stats.map((item) => `
@@ -1506,7 +1512,7 @@ function renderQuickStats(monthRecords) {
   const expenses = monthRecords.filter((record) => record.type === "expense");
   const highest = expenses.reduce((max, record) => Math.max(max, record.amountCents), 0);
   return `
-    <section class="paper-card">
+    <section class="content-group quick-stats-group">
       <div class="section-heading"><div><h2>本月速览</h2><div class="subtle">共 ${monthRecords.length} 笔记录</div></div></div>
       <div class="quick-list">
         <div class="quick-row"><span>平均每天支出</span><strong>${formatMoney(Math.round(totals.expense / Math.max(days, 1)))}</strong></div>
@@ -1517,73 +1523,82 @@ function renderQuickStats(monthRecords) {
 }
 
 function renderSettings() {
-  const preview = categoriesFor("expense").slice(0, 8);
+  const preview = categoriesFor("expense");
   return `
-    <div class="page">
-      <div class="page-title-row"><div><span class="eyebrow">本地 · 米糕</span><h1>我的</h1></div><span class="small-chip">v1.5</span></div>
-      <section class="paper-card">
-        <div class="settings-brand"><img class="mascot small" src="./assets/black-shiba-mascot.png" alt="米糕黑柴"><div class="settings-brand-copy"><strong>米糕记账</strong><span>记录每一个值得记住的日常</span></div></div>
-      </section>
-      <section class="paper-card">
-        <div class="section-heading"><div><h2>基础分类</h2><div class="subtle">第一版内置常用分类</div></div><span class="small-chip">28 类支出</span></div>
-        <div class="category-summary">${preview.map((item) => `<div class="category-summary-item">${categoryIconMarkup(item.id, "expense")}<span>${item.name}</span></div>`).join("")}</div>
-      </section>
-      <section class="paper-card">
-        <div class="section-heading"><div><h2>当前版本</h2><div class="subtle">轻量、离线、不收费</div></div></div>
-        <div class="settings-list">
-          <div class="settings-line"><span class="line-icon">${iconMarkup("database", "line-glyph")}</span><span>账单保存在本机浏览器</span><small>${records.length} 笔</small></div>
-          <div class="settings-line"><span class="line-icon">${iconMarkup("currency-yuan", "line-glyph")}</span><span>人民币元，固定两位小数</span></div>
-          <div class="settings-line"><span class="line-icon">${iconMarkup("refresh", "line-glyph")}</span><span>网页更新不改变本地数据</span></div>
-          <div class="settings-line"><span class="line-icon">${iconMarkup("cloud", "line-glyph")}</span><span>${autoBackupText()}</span></div>
-        </div>
-        <div class="settings-actions">
-          <button class="action-button secondary" type="button" data-action="refresh-app">刷新到最新版本</button>
-        </div>
-      </section>
-      <section class="paper-card backup-card">
-        <div class="section-heading"><div><h2>数据管理</h2><div class="subtle">本机备份和旧数据导入</div></div><span class="small-chip">${records.length} 笔</span></div>
-        <div class="subtle backup-note">主屏幕独立 Web App 和 Safari 可能是两套本地账单。开启云备份后，两边只要使用同一个手机号账号和同步密码，打开时会自动从云端合并，记账后会自动上传。JSON 导入导出只作为兜底备份。</div>
-        <div class="merge-steps">
-          <div><strong>1</strong><span>在有旧账单的入口开启同一个云备份账号</span></div>
-          <div><strong>2</strong><span>回到主屏幕 Web App，使用同一手机号和同步密码开启云备份</span></div>
-          <div><strong>3</strong><span>以后打开自动合并，保存账单后自动上传</span></div>
-        </div>
-        <div class="backup-auto-note">${iconMarkup("refresh", "inline-glyph")} ${autoBackupText()}</div>
-        <div class="backup-manual-note">${manualBackupText()}</div>
-        <div class="backup-actions">
-          <button class="action-button secondary" type="button" data-action="export-data">导出 JSON 备份</button>
-          <button class="action-button secondary" type="button" data-action="import-data">导入 JSON 备份</button>
+    <div class="page settings-page">
+      <div class="page-title-row"><div><span class="eyebrow">本地 · 米糕</span><h1>我的</h1></div></div>
+
+      <header class="settings-profile">
+        <img class="mascot small" src="./assets/black-shiba-mascot.png" alt="米糕黑柴">
+        <div><strong>米糕记账</strong><span>记录每一个值得记住的日常</span></div>
+        <span class="profile-count">${records.length} 笔</span>
+      </header>
+
+      <section class="settings-section">
+        <h2>数据与备份</h2>
+        <div class="settings-group">
+          <div class="settings-row static-row"><span class="line-icon">${iconMarkup("database", "line-glyph")}</span><span><strong>本机自动快照</strong><small>${autoBackupShortText()}</small></span></div>
+          <button class="settings-row" type="button" data-action="export-data"><span class="line-icon">${iconMarkup("file-download", "line-glyph")}</span><span><strong>导出 JSON 备份</strong><small>${manualBackupShortText()}</small></span>${iconMarkup("chevron-right", "row-chevron")}</button>
+          <button class="settings-row" type="button" data-action="import-data"><span class="line-icon">${iconMarkup("file-upload", "line-glyph")}</span><span><strong>导入 JSON 备份</strong><small>换设备或恢复旧账单</small></span>${iconMarkup("chevron-right", "row-chevron")}</button>
+          <button class="settings-row" type="button" data-action="refresh-app"><span class="line-icon">${iconMarkup("refresh", "line-glyph")}</span><span><strong>刷新到最新版本</strong><small>无网络时继续保留当前本地版本</small></span>${iconMarkup("chevron-right", "row-chevron")}</button>
           <input type="file" accept="application/json,.json" data-backup-input hidden>
         </div>
       </section>
-      <section class="paper-card cloud-card">
-        <div class="section-heading"><div><h2>云备份</h2><div class="subtle">手机号作为账号，同步密码/PIN 负责加密</div></div><span class="small-chip">可选</span></div>
-        <div class="subtle backup-note">云备份用于换手机、重装或自动合并 Safari/Web App 两套账单。账单上传前会在本机加密，云端只保存密文；请记住手机号和同步密码，忘记密码无法解密云端备份。</div>
-        <div class="backup-auto-note">${iconMarkup("cloud", "inline-glyph")} ${cloudSyncText()}</div>
-        ${cloudSyncConfig ? `
-          <div class="backup-actions">
-            <button class="action-button secondary" type="button" data-action="cloud-sync" ${cloudSyncBusy ? "disabled" : ""}>立即同步</button>
-            <button class="action-button secondary" type="button" data-action="cloud-disable" ${cloudSyncBusy ? "disabled" : ""}>关闭本机云备份配置</button>
-          </div>
-        ` : `
-          <div class="cloud-form">
-            <div class="field"><label for="cloud-endpoint">Worker 地址</label><input id="cloud-endpoint" data-cloud-field="endpoint" inputmode="url" value="${CLOUD_SYNC_DEFAULT_ENDPOINT}" placeholder="https://你的-worker.workers.dev"></div>
-            <div class="field"><label for="cloud-phone">手机号账号</label><input id="cloud-phone" data-cloud-field="phone" inputmode="tel" autocomplete="tel" placeholder="例如：13800138000"></div>
-            <div class="field"><label for="cloud-pin">同步密码 / PIN</label><input id="cloud-pin" data-cloud-field="pin" type="password" autocomplete="new-password" placeholder="至少 4 位，务必记住"></div>
-          </div>
-          <button class="action-button" type="button" data-action="cloud-enable" ${cloudSyncBusy ? "disabled" : ""}>开启自动云备份</button>
-        `}
+
+      <section class="settings-section">
+        <h2>云同步</h2>
+        <div class="settings-group settings-cloud-group">
+          <div class="settings-row static-row"><span class="line-icon">${iconMarkup("cloud", "line-glyph")}</span><span><strong>${cloudSyncConfig ? "云备份已开启" : "可选的加密云备份"}</strong><small>${cloudSyncShortText()}</small></span></div>
+          ${cloudSyncConfig ? `
+            <div class="settings-inline-actions">
+              <button class="action-button secondary" type="button" data-action="cloud-sync" ${cloudSyncBusy ? "disabled" : ""}>立即同步</button>
+              <button class="text-danger-button" type="button" data-action="cloud-disable" ${cloudSyncBusy ? "disabled" : ""}>关闭云备份</button>
+            </div>
+          ` : `
+            <div class="cloud-form grouped-form">
+              <div class="field"><label for="cloud-phone">手机号账号</label><input id="cloud-phone" data-cloud-field="phone" inputmode="tel" autocomplete="tel" placeholder="例如：13800138000"></div>
+              <div class="field"><label for="cloud-pin">同步密码 / PIN</label><input id="cloud-pin" data-cloud-field="pin" type="password" autocomplete="new-password" placeholder="至少 4 位，务必记住"></div>
+              <details class="settings-disclosure advanced-settings">
+                <summary>高级设置 <span>Worker 地址</span></summary>
+                <div class="disclosure-body"><div class="field"><label for="cloud-endpoint">Worker 地址</label><input id="cloud-endpoint" data-cloud-field="endpoint" inputmode="url" value="${CLOUD_SYNC_DEFAULT_ENDPOINT}" placeholder="https://你的-worker.workers.dev"></div></div>
+              </details>
+            </div>
+            <div class="settings-inline-actions"><button class="action-button" type="button" data-action="cloud-enable" ${cloudSyncBusy ? "disabled" : ""}>开启自动云备份</button></div>
+          `}
+        </div>
       </section>
-      <section class="paper-card">
-        <div class="section-heading"><div><h2>主屏幕入口</h2><div class="subtle">长期使用固定从 Web App 打开</div></div><span class="reminder-mark">${iconMarkup("paw", "reminder-glyph")}</span></div>
-        <div class="subtle" style="line-height:1.65;">用 Safari 第一次打开网址并添加到主屏幕；之后日常记账、查看和导入备份都从主屏幕图标进入。不要把 Safari 地址栏里的页面当成另一个日常账本。</div>
+
+      <section class="settings-section">
+        <h2>关于与帮助</h2>
+        <div class="settings-group">
+          <button class="settings-row" type="button" data-action="help"><span class="line-icon">${iconMarkup("home", "line-glyph")}</span><span><strong>安装与使用说明</strong><small>添加到 iPhone 主屏幕、离线使用</small></span>${iconMarkup("chevron-right", "row-chevron")}</button>
+          <details class="settings-disclosure">
+            <summary><span class="line-icon">${iconMarkup("tag", "line-glyph")}</span><span><strong>基础分类</strong><small>常用优先的 28 类支出分类</small></span><span class="disclosure-count">28 类</span></summary>
+            <div class="disclosure-body"><div class="category-summary compact-category-summary">${preview.map((item) => `<div class="category-summary-item">${categoryIconMarkup(item.id, "expense")}<span>${item.name}</span></div>`).join("")}</div></div>
+          </details>
+          <details class="settings-disclosure">
+            <summary><span class="line-icon">${iconMarkup("database", "line-glyph")}</span><span><strong>数据如何保存</strong><small>本机、自动快照与云备份的区别</small></span>${iconMarkup("chevron-right", "row-chevron")}</summary>
+            <div class="disclosure-body settings-explanation">
+              <p>账单默认保存在当前主屏幕 Web App 的本机浏览器空间，每天凌晨会自动更新本机快照。</p>
+              <p>网页更新不会清空账单；清除网站数据或换设备前，请导出 JSON 或启用云备份。Safari 与主屏幕 Web App 可能是两套本地数据，使用同一云备份账号可自动合并。</p>
+            </div>
+          </details>
+          <div class="settings-row static-row"><span class="line-icon">${iconMarkup("currency-yuan", "line-glyph")}</span><span><strong>金额格式</strong><small>人民币元，固定保留两位小数</small></span></div>
+        </div>
       </section>
+      <footer class="settings-version">米糕记账 v1.6 · 轻量、离线、不收费</footer>
     </div>`;
 }
 
 function renderAddModal() {
   const draft = ui.draft || createDraft();
   const categories = categoriesFor(draft.type);
+  let featuredCategories = categories.slice(0, 8);
+  if (!featuredCategories.some((category) => category.id === draft.categoryId)) {
+    const selected = categories.find((category) => category.id === draft.categoryId);
+    if (selected) featuredCategories = [...featuredCategories.slice(0, 7), selected];
+  }
+  const visibleCategories = ui.showAllCategories ? categories : featuredCategories;
   const meta = TYPE_META[draft.type];
   return `
     <div class="modal-backdrop" data-action="close-modal">
@@ -1594,24 +1609,24 @@ function renderAddModal() {
             <div class="type-pills">
               ${Object.entries(TYPE_META).map(([type, value]) => `<button class="type-pill ${value.className} ${draft.type === type ? "active" : ""}" type="button" data-action="select-type" data-type="${type}">${value.title}</button>`).join("")}
             </div>
-            <section class="paper-card amount-card form-card">
+            <section class="form-group amount-card">
               <div class="amount-label">金额（元）</div>
               <div class="amount-entry"><em class="${meta.className}-text">¥</em><input data-draft-field="amountText" inputmode="decimal" autocomplete="off" placeholder="0.00" value="${escapeHtml(draft.amountText)}" aria-label="金额"></div>
             </section>
-            <section class="paper-card form-card">
+            <section class="form-group note-form-group">
               <div class="field"><label for="record-note">备注</label><textarea id="record-note" data-draft-field="note" placeholder="例如：午餐、打车上班">${escapeHtml(draft.note)}</textarea></div>
             </section>
-            <section class="paper-card form-card">
+            <section class="form-group category-form-group">
               <div class="section-heading"><div><h2>选择分类</h2><div class="subtle">基础分类 · 常用分类优先</div></div></div>
-              <div class="category-grid">${categories.map((category) => `<button class="category-button ${draft.categoryId === category.id ? "selected" : ""}" type="button" data-action="select-category" data-category="${category.id}">${categoryIconMarkup(category.id, meta.className)}<span>${category.name}</span></button>`).join("")}</div>
+              <div class="category-grid">${visibleCategories.map((category) => `<button class="category-button ${draft.categoryId === category.id ? "selected" : ""}" type="button" data-action="select-category" data-category="${category.id}">${categoryIconMarkup(category.id, meta.className)}<span>${category.name}</span></button>`).join("")}</div>
+              <button class="category-expand-button" type="button" data-action="toggle-categories">${ui.showAllCategories ? "收起分类" : `全部分类（${categories.length}）`}${iconMarkup("chevron-right", "row-chevron")}</button>
             </section>
-            <section class="paper-card form-card">
-              <div class="field-grid">
-                <div class="field"><label for="occurred-at">日期和时间</label><input id="occurred-at" type="datetime-local" data-draft-field="occurredAt" value="${escapeHtml(draft.occurredAt)}"></div>
-                <div class="field"><label for="account-name">${draft.type === "transfer" ? "转出账户" : "账户"}</label><input id="account-name" data-draft-field="accountName" value="${escapeHtml(draft.accountName)}" placeholder="例如：微信"></div>
-                ${draft.type === "transfer" ? `<div class="field"><label for="destination-account">转入账户</label><input id="destination-account" data-draft-field="destinationAccountName" value="${escapeHtml(draft.destinationAccountName)}" placeholder="例如：银行卡"></div>` : ""}
-              </div>
-            </section>
+            <button class="form-disclosure ${ui.showMoreOptions ? "open" : ""}" type="button" data-action="toggle-more-options"><span><strong>更多选项</strong><small>日期、时间与账户</small></span>${iconMarkup("chevron-right", "row-chevron")}</button>
+            ${ui.showMoreOptions ? `<section class="form-group more-options-group"><div class="field-grid">
+              <div class="field"><label for="occurred-at">日期和时间</label><input id="occurred-at" type="datetime-local" data-draft-field="occurredAt" value="${escapeHtml(draft.occurredAt)}"></div>
+              <div class="field"><label for="account-name">${draft.type === "transfer" ? "转出账户" : "账户"}</label><input id="account-name" data-draft-field="accountName" value="${escapeHtml(draft.accountName)}" placeholder="例如：微信"></div>
+              ${draft.type === "transfer" ? `<div class="field"><label for="destination-account">转入账户</label><input id="destination-account" data-draft-field="destinationAccountName" value="${escapeHtml(draft.destinationAccountName)}" placeholder="例如：银行卡"></div>` : ""}
+            </div></section>` : ""}
           </div>
           <div class="modal-save-bar">
             <button class="action-button save-record-button" type="submit">保存这笔记录</button>
@@ -1644,9 +1659,28 @@ function renderHelpModal() {
     </div>`;
 }
 
+function renderRecordActionsModal() {
+  const record = records.find((item) => item.id === ui.recordActionId);
+  if (!record) return "";
+  const meta = TYPE_META[record.type] || TYPE_META.expense;
+  return `
+    <div class="modal-backdrop record-action-backdrop" data-action="close-record-actions">
+      <section class="modal-sheet record-action-sheet" data-modal-sheet aria-label="账单操作">
+        <div class="record-action-summary">
+          ${categoryIconMarkup(record.categoryId, meta.className)}
+          <div><strong>${escapeHtml(record.categoryName)}</strong><span>${escapeHtml(record.note || record.accountName)}</span></div>
+          <strong class="${meta.className}-text">${formatSigned(record)}</strong>
+        </div>
+        <button class="record-delete-action" type="button" data-action="delete-record" data-id="${escapeHtml(record.id)}">${iconMarkup("trash", "button-glyph")} 删除这笔记录</button>
+        <button class="record-cancel-action" type="button" data-action="close-record-actions">取消</button>
+      </section>
+    </div>`;
+}
+
 function renderModals() {
   if (ui.modal) return renderAddModal();
   if (ui.helpModal) return renderHelpModal();
+  if (ui.recordActionId) return renderRecordActionsModal();
   return "";
 }
 
@@ -1661,6 +1695,9 @@ function render() {
   }[ui.tab]();
 
   document.querySelector("#modal-root").innerHTML = renderModals();
+  document.body.classList.toggle("modal-open", ui.modal || ui.helpModal || !!ui.recordActionId);
+  const floatingAdd = document.querySelector(".floating-add");
+  if (floatingAdd) floatingAdd.hidden = ui.tab !== "home" || ui.modal || ui.helpModal || !!ui.recordActionId;
   document.querySelectorAll(".nav-item[data-tab]").forEach((button) => {
     button.classList.toggle("active", button.dataset.tab === ui.tab);
   });
@@ -1675,7 +1712,10 @@ function openAddModal() {
   ui.draft = createDraft("expense");
   ui.modal = true;
   ui.helpModal = false;
+  ui.recordActionId = null;
   ui.quickEntry = false;
+  ui.showAllCategories = false;
+  ui.showMoreOptions = false;
   render();
   window.setTimeout(() => document.querySelector('[data-draft-field="amountText"]')?.focus(), 50);
 }
@@ -1683,6 +1723,8 @@ function openAddModal() {
 function closeModal() {
   ui.modal = false;
   ui.quickEntry = false;
+  ui.showAllCategories = false;
+  ui.showMoreOptions = false;
   ui.draft = null;
   render();
 }
@@ -1690,10 +1732,29 @@ function closeModal() {
 function showToast(message) {
   const element = document.querySelector("#toast");
   if (!element) return;
-  element.textContent = message;
+  element.replaceChildren(document.createTextNode(message));
+  element.classList.remove("with-action");
   element.classList.add("show");
   window.clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => element.classList.remove("show"), 2300);
+}
+
+function showUndoToast(message) {
+  const element = document.querySelector("#toast");
+  if (!element) return;
+  const label = document.createElement("span");
+  label.textContent = message;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.dataset.action = "undo-delete";
+  button.textContent = "撤销";
+  element.replaceChildren(label, button);
+  element.classList.add("with-action", "show");
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => {
+    element.classList.remove("show", "with-action");
+    pendingUndo = null;
+  }, 5200);
 }
 
 function activateTrendDay(actionElement) {
@@ -1718,37 +1779,22 @@ function updateTrendVisual(date, amountCents) {
   const days = Number(chartElement.dataset.days || 0);
   const left = Number(chartElement.dataset.chartLeft || 0);
   const right = Number(chartElement.dataset.chartRight || 0);
-  const top = Number(chartElement.dataset.chartTop || 0);
-  const base = Number(chartElement.dataset.chartBase || 0);
   const viewWidth = Number(chartElement.dataset.viewWidth || 0);
   const dateValue = dateFromKey(date);
   const index = dateValue.getDate() - 1;
   if (!days || index < 0 || index >= days || right <= left || !viewWidth) return false;
 
-  const stepX = (right - left) / Math.max(days - 1, 1);
-  const pointX = left + stepX * index;
-  const x1 = index === 0 ? left : pointX - stepX / 2;
-  const x2 = index === days - 1 ? right : pointX + stepX / 2;
-  const bandTop = top - 8;
-  const svgNamespace = "http://www.w3.org/2000/svg";
-  let band = chartElement.querySelector(".trend-selected-band");
-  if (!band) {
-    band = document.createElementNS(svgNamespace, "rect");
-    band.classList.add("trend-selected-band");
-    chartElement.insertBefore(band, chartElement.querySelector(".trend-area"));
-  }
-  setSvgAttributes(band, {
-    x: x1.toFixed(1),
-    y: bandTop,
-    width: (x2 - x1).toFixed(1),
-    height: (base - bandTop).toFixed(1),
-    rx: 2
+  const slotWidth = (right - left) / days;
+  const pointX = left + slotWidth * index + slotWidth / 2;
+  chartElement.querySelectorAll(".trend-bar").forEach((bar) => {
+    bar.classList.toggle("selected", bar.dataset.date === date);
   });
 
   const tooltipWidth = 112;
   const tooltipX = Math.min(Math.max(pointX - tooltipWidth / 2, 8), viewWidth - tooltipWidth - 8);
   const tooltip = chartElement.querySelector(".trend-tooltip");
   if (!tooltip) return true;
+  tooltip.classList.add("visible");
   setSvgAttributes(tooltip.querySelector("rect"), { x: tooltipX.toFixed(1), y: 6, width: tooltipWidth, height: 42, rx: 8 });
   setSvgAttributes(tooltip.querySelector("path"), { d: `M ${pointX.toFixed(1)} 54 l -6 -7 h 12 Z` });
   const texts = tooltip.querySelectorAll("text");
@@ -1775,7 +1821,7 @@ function trendDataFromPointer(event) {
   if (!days || right <= left) return null;
   const viewX = ((event.clientX - rect.left) / rect.width) * viewWidth;
   const ratio = Math.min(1, Math.max(0, (viewX - left) / (right - left)));
-  const index = Math.min(days - 1, Math.max(0, Math.round(ratio * (days - 1))));
+  const index = Math.min(days - 1, Math.max(0, Math.floor(ratio * days)));
   const date = new Date(ui.monthCursor.getFullYear(), ui.monthCursor.getMonth(), index + 1);
   const amountCents = dailyExpenses(ui.monthCursor)[index]?.amountCents || 0;
   return { date: dateKey(date), amountCents };
@@ -1841,13 +1887,23 @@ function updateDraftCategorySelection(categoryId) {
 }
 
 function deleteRecord(id) {
-  const record = records.find((item) => item.id === id);
-  if (!record) return;
-  if (!window.confirm(`确定删除“${record.categoryName} ${formatMoney(record.amountCents)}”吗？`)) return;
-  records = records.filter((item) => item.id !== id);
+  const index = records.findIndex((item) => item.id === id);
+  if (index < 0) return;
+  const [record] = records.splice(index, 1);
+  pendingUndo = { record, index };
+  ui.recordActionId = null;
   persistRecords();
   render();
-  showToast("已删除这笔记录");
+  showUndoToast("已删除这笔记录");
+}
+
+function undoDeleteRecord() {
+  if (!pendingUndo) return;
+  records.splice(Math.min(pendingUndo.index, records.length), 0, pendingUndo.record);
+  pendingUndo = null;
+  persistRecords();
+  render();
+  showToast("已恢复这笔记录");
 }
 
 function saveDraft(event) {
@@ -1887,8 +1943,8 @@ function handleClick(event) {
   if (!actionElement) return;
   const action = actionElement.dataset.action;
 
-  if (action === "close-modal" && event.target !== actionElement && actionElement.dataset.modalSheet === undefined) return;
-  if (action === "close-help" && event.target !== actionElement && actionElement.dataset.modalSheet === undefined) return;
+  const backdropCloseActions = new Set(["close-modal", "close-help", "close-record-actions"]);
+  if (backdropCloseActions.has(action) && actionElement.classList.contains("modal-backdrop") && event.target !== actionElement) return;
 
   switch (action) {
     case "add":
@@ -1896,6 +1952,7 @@ function handleClick(event) {
       break;
     case "help":
       ui.helpModal = true;
+      ui.recordActionId = null;
       render();
       break;
     case "close-modal":
@@ -1903,6 +1960,14 @@ function handleClick(event) {
       break;
     case "close-help":
       ui.helpModal = false;
+      render();
+      break;
+    case "record-more":
+      ui.recordActionId = actionElement.dataset.id;
+      render();
+      break;
+    case "close-record-actions":
+      ui.recordActionId = null;
       render();
       break;
     case "export-data":
@@ -1930,6 +1995,7 @@ function handleClick(event) {
       if (ui.draft) {
         ui.draft.type = actionElement.dataset.type;
         ui.draft.categoryId = categoriesFor(ui.draft.type)[0].id;
+        ui.showAllCategories = false;
         render();
       }
       break;
@@ -1937,6 +2003,14 @@ function handleClick(event) {
       if (ui.draft) {
         if (!updateDraftCategorySelection(actionElement.dataset.category)) render();
       }
+      break;
+    case "toggle-categories":
+      ui.showAllCategories = !ui.showAllCategories;
+      render();
+      break;
+    case "toggle-more-options":
+      ui.showMoreOptions = !ui.showMoreOptions;
+      render();
       break;
     case "ledger-mode":
       ui.ledgerMode = actionElement.dataset.mode;
@@ -1949,11 +2023,13 @@ function handleClick(event) {
     case "previous-month":
       ui.monthCursor = addMonths(ui.monthCursor, -1);
       ui.selectedDate = dateKey(ui.monthCursor);
+      ui.trendSelectedDate = null;
       render();
       break;
     case "next-month":
       ui.monthCursor = addMonths(ui.monthCursor, 1);
       ui.selectedDate = dateKey(ui.monthCursor);
+      ui.trendSelectedDate = null;
       render();
       break;
     case "calendar-date":
@@ -1967,6 +2043,9 @@ function handleClick(event) {
       break;
     case "delete-record":
       deleteRecord(actionElement.dataset.id);
+      break;
+    case "undo-delete":
+      undoDeleteRecord();
       break;
     default:
       break;
