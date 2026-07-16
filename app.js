@@ -1586,7 +1586,7 @@ function renderSettings() {
           <div class="settings-row static-row"><span class="line-icon">${iconMarkup("currency-yuan", "line-glyph")}</span><span><strong>金额格式</strong><small>人民币元，固定保留两位小数</small></span></div>
         </div>
       </section>
-      <footer class="settings-version">米糕记账 v1.6 · 轻量、离线、不收费</footer>
+      <footer class="settings-version">米糕记账 v1.6.1 · 轻量、离线、不收费</footer>
     </div>`;
 }
 
