@@ -1,29 +1,21 @@
-const CACHE_NAME = "bookkeeping2607-pwa-v33";
-const ICON_FILES = [
-  "apple.svg", "arrow-back-up.svg", "arrow-up-circle.svg", "book-2.svg", "bottle.svg",
-  "briefcase.svg", "building-cottage.svg", "calendar.svg", "camera.svg", "car.svg",
-  "cash-banknote.svg", "chart-bar.svg", "chart-line.svg", "chart-pie.svg", "chevron-left.svg",
-  "chevron-right.svg", "clock-hour-4.svg", "cloud.svg", "credit-card.svg", "cup.svg",
-  "currency-yuan.svg", "database.svg", "device-gamepad-2.svg", "device-mobile.svg", "dots.svg",
-  "equal.svg", "file-download.svg", "file-upload.svg", "friends.svg", "gift.svg",
-  "gift-card.svg", "home.svg", "ice-cream-2.svg", "message-circle.svg", "music.svg",
-  "package.svg", "paw.svg", "pencil.svg", "pill.svg", "plus.svg", "receipt-2.svg",
-  "refresh.svg", "run.svg", "salad.svg", "school.svg", "settings.svg", "shirt.svg",
-  "shopping-bag.svg", "sparkles.svg", "star.svg", "sun.svg", "tag.svg",
-  "tools-kitchen-2.svg", "trash.svg", "user-circle.svg", "users.svg", "wallet.svg", "x.svg"
-].map((name) => `./assets/icons/${name}`);
+const CACHE_NAME = "bookkeeping2607-pwa-v34";
 
-const APP_SHELL = [
+const CORE_FILES = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
-  "./manifest.webmanifest",
-  "./service-worker.js",
+  "./manifest.webmanifest"
+];
+
+const VISUAL_FILES = [
   "./assets/black-shiba-mascot.png",
-  "./assets/black-shiba-mascot-active.png",
   "./assets/mint-paper-texture.webp",
-  ...ICON_FILES
+  "./assets/icons/home.svg",
+  "./assets/icons/receipt-2.svg",
+  "./assets/icons/chart-pie.svg",
+  "./assets/icons/user-circle.svg",
+  "./assets/icons/pencil.svg"
 ];
 
 const CORE_PATHS = [
@@ -31,11 +23,7 @@ const CORE_PATHS = [
   "/index.html",
   "/styles.css",
   "/app.js",
-  "/manifest.webmanifest",
-  "/service-worker.js",
-  "/assets/black-shiba-mascot.png",
-  "/assets/black-shiba-mascot-active.png",
-  "/assets/mint-paper-texture.webp"
+  "/manifest.webmanifest"
 ];
 
 function isSameOrigin(request) {
@@ -48,8 +36,12 @@ function isCoreRequest(request) {
   return CORE_PATHS.some((path) => pathname.endsWith(path));
 }
 
+function scopedRequest(path) {
+  return new Request(new URL(path, self.registration.scope).toString());
+}
+
 function indexCacheRequest() {
-  return new Request(new URL("./index.html", self.registration.scope).toString());
+  return scopedRequest("./index.html");
 }
 
 async function cacheResponse(request, response) {
@@ -63,20 +55,40 @@ async function cacheResponse(request, response) {
   return response;
 }
 
-async function cachedCoreResponse(request, fallbackToIndex = false) {
+async function cachedResponse(request, fallbackToIndex = false) {
   const cache = await caches.open(CACHE_NAME);
   const cached = await cache.match(request, { ignoreSearch: true });
   if (cached) return cached;
-  if (fallbackToIndex) return cache.match(indexCacheRequest());
+  if (fallbackToIndex) return cache.match(indexCacheRequest(), { ignoreSearch: true });
   return undefined;
 }
 
+async function seedVisualFile(cache, path) {
+  const request = scopedRequest(path);
+  const existing = await caches.match(request, { ignoreSearch: true });
+  if (existing) {
+    await cache.put(request, existing);
+    return;
+  }
+  try {
+    const response = await fetch(request, { cache: "force-cache" });
+    if (response.ok) await cache.put(request, response);
+  } catch (_) {
+    // Visuals can be filled on demand; a slow image must not break the app update.
+  }
+}
+
 self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(APP_SHELL))
-      .then(() => self.skipWaiting())
-  );
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    const coreRequests = CORE_FILES.map((path) => new Request(
+      new URL(path, self.registration.scope).toString(),
+      { cache: "reload" }
+    ));
+    await cache.addAll(coreRequests);
+    await Promise.all(VISUAL_FILES.map((path) => seedVisualFile(cache, path)));
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener("activate", (event) => {
@@ -97,25 +109,32 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET" || !isSameOrigin(event.request)) return;
 
   if (event.request.mode === "navigate") {
+    const cacheKey = indexCacheRequest();
+    const networkResponse = fetch(event.request)
+      .then((response) => cacheResponse(cacheKey, response));
+    event.waitUntil(networkResponse.then(() => undefined).catch(() => undefined));
     event.respondWith(
-      fetch(event.request)
-        .then((response) => cacheResponse(indexCacheRequest(), response))
-        .catch(() => cachedCoreResponse(event.request, true))
+      cachedResponse(cacheKey, true)
+        .then((cached) => cached || networkResponse)
+        .catch(() => cachedResponse(cacheKey, true))
     );
     return;
   }
 
   if (isCoreRequest(event.request)) {
+    const networkResponse = fetch(event.request)
+      .then((response) => cacheResponse(event.request, response));
+    event.waitUntil(networkResponse.then(() => undefined).catch(() => undefined));
     event.respondWith(
-      fetch(event.request)
-        .then((response) => cacheResponse(event.request, response))
-        .catch(() => cachedCoreResponse(event.request))
+      cachedResponse(event.request)
+        .then((cached) => cached || networkResponse)
+        .catch(() => cachedResponse(event.request))
     );
     return;
   }
 
   event.respondWith(
-    caches.match(event.request).then((cached) => {
+    caches.match(event.request, { ignoreSearch: true }).then((cached) => {
       if (cached) return cached;
       return fetch(event.request).then((response) => cacheResponse(event.request, response));
     })

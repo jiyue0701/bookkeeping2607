@@ -11,6 +11,9 @@ const CLOUD_SYNC_CONFIG_KEY = "bookkeeping2607.pwa.cloudSync";
 const CLOUD_SYNC_FORMAT = "migao-cloud-backup-encrypted";
 const CLOUD_SYNC_VERSION = 1;
 const CLOUD_SYNC_DEFAULT_ENDPOINT = "https://migao-bookkeeping-cloud.migao-bookkeeping.workers.dev";
+const CLOUD_SYNC_TIMEOUT_MS = 10000;
+const CLOUD_SYNC_RETRY_MIN_MS = 30000;
+const CLOUD_SYNC_RETRY_MAX_MS = 5 * 60 * 1000;
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
 
 const TYPE_META = {
@@ -126,8 +129,9 @@ let trendDragActive = false;
 let autoBackupTimer = null;
 let midnightBackupTimer = null;
 let cloudBackupTimer = null;
+let cloudRetryTimer = null;
+let cloudRetryDelayMs = CLOUD_SYNC_RETRY_MIN_MS;
 let cloudStartupSyncDone = false;
-let cloudSyncDirty = false;
 let autoBackupStatus = {
   supported: typeof window !== "undefined" && !!window.indexedDB,
   available: false,
@@ -136,10 +140,10 @@ let autoBackupStatus = {
 };
 let lastManualBackupAt = loadLastManualBackupAt();
 let cloudSyncConfig = loadCloudSyncConfig();
+let cloudSyncDirty = !!cloudSyncConfig?.pendingUploadAt;
 let cloudSyncStatus = "";
 let cloudSyncBusy = false;
 let mascotReactionTimer = null;
-let mascotEntryPending = true;
 let serviceWorkerControllerBound = false;
 let serviceWorkerSwapPending = false;
 let pendingUndo = null;
@@ -230,7 +234,11 @@ function loadCloudSyncConfig() {
       encryptionKey: String(value.encryptionKey),
       identityVersion: Number(value.identityVersion || 1),
       lastUploadedAt: value.lastUploadedAt || null,
-      lastRestoredAt: value.lastRestoredAt || null
+      lastRestoredAt: value.lastRestoredAt || null,
+      lastSyncedAt: value.lastSyncedAt || value.lastUploadedAt || null,
+      lastSyncAttemptAt: value.lastSyncAttemptAt || null,
+      lastSyncError: value.lastSyncError || null,
+      pendingUploadAt: value.pendingUploadAt || null
     };
   } catch (_) {
     return null;
@@ -400,47 +408,109 @@ async function decryptCloudPayload(encryptedPayload, base64Key) {
 
 async function cloudRequest(path, options = {}) {
   if (!cloudSyncConfig?.endpoint) throw new Error("cloud sync disabled");
-  const response = await fetch(`${cloudSyncConfig.endpoint}${path}`, {
-    ...options,
-    headers: {
-      "content-type": "application/json",
-      ...(options.headers || {})
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), CLOUD_SYNC_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${cloudSyncConfig.endpoint}${path}`, {
+      ...options,
+      cache: "no-store",
+      signal: controller.signal,
+      headers: {
+        "content-type": "application/json",
+        ...(options.headers || {})
+      }
+    });
+    const text = await response.text();
+    const data = text ? JSON.parse(text) : null;
+    if (!response.ok) {
+      const message = data?.error || `cloud request failed: ${response.status}`;
+      throw new Error(message);
     }
-  });
-  const text = await response.text();
-  const data = text ? JSON.parse(text) : null;
-  if (!response.ok) {
-    const message = data?.error || `cloud request failed: ${response.status}`;
-    throw new Error(message);
+    return data;
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error("timeout");
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
   }
-  return data;
+}
+
+function cloudFailureText(error) {
+  if (error?.message === "forbidden") return "同步密码不匹配：这个手机号已绑定其它同步密码";
+  return "云端暂时无法连接，账单已保存在本机并会自动重试";
+}
+
+function cloudStatusIsImportant() {
+  return cloudSyncBusy || /失败|不匹配|无法连接|等待|正在/.test(cloudSyncStatus);
 }
 
 function cloudSyncText() {
-  if (cloudSyncStatus) return cloudSyncStatus;
+  if (cloudSyncStatus && cloudStatusIsImportant()) return cloudSyncStatus;
   if (!cloudSyncConfig) return "未开启。使用手机号作为账号，再设置同步密码/PIN；开启后会自动拉取合并、保存后自动上传。";
   if (cloudSyncConfig.identityVersion !== 2) return `${cloudSyncConfig.accountLabel} 使用旧版云备份配置。同手机号不同 PIN 会分成两套备份；建议关闭后用最终 PIN 重新开启。`;
-  const last = cloudSyncConfig.lastUploadedAt ? `上次云备份：${backupTimeLabel(cloudSyncConfig.lastUploadedAt)}` : "还没有上传过云备份";
-  return `${cloudSyncConfig.accountLabel} 已开启自动同步。打开时自动合并云端账单，记账后自动上传。${last}`;
+  if (cloudSyncConfig.lastSyncError) return cloudSyncConfig.lastSyncError;
+  if (cloudSyncConfig.pendingUploadAt) return "账单已保存在本机，正在等待自动上传";
+  const last = cloudSyncConfig.lastSyncedAt
+    ? `上次成功同步：${backupTimeLabel(cloudSyncConfig.lastSyncedAt)}`
+    : "正在等待首次自动同步";
+  return `${cloudSyncConfig.accountLabel} 已开启自动同步。打开时自动合并，记账后约 3 秒自动上传。${last}`;
 }
 
-function scheduleCloudBackup() {
+function clearCloudRetry() {
+  if (cloudRetryTimer) window.clearTimeout(cloudRetryTimer);
+  cloudRetryTimer = null;
+  cloudRetryDelayMs = CLOUD_SYNC_RETRY_MIN_MS;
+}
+
+function scheduleCloudRetry() {
+  if (!cloudSyncConfig?.enabled || cloudRetryTimer || navigator.onLine === false) return;
+  const delay = cloudRetryDelayMs;
+  cloudRetryTimer = window.setTimeout(async () => {
+    cloudRetryTimer = null;
+    if (document.visibilityState === "hidden") {
+      scheduleCloudRetry();
+      return;
+    }
+    const synced = await syncCloudNow(false);
+    if (synced) {
+      clearCloudRetry();
+      return;
+    }
+    cloudRetryDelayMs = Math.min(CLOUD_SYNC_RETRY_MAX_MS, cloudRetryDelayMs * 2);
+    scheduleCloudRetry();
+  }, delay);
+}
+
+function scheduleCloudBackup(delayMs = 3000) {
   if (!cloudSyncConfig?.enabled) return;
   cloudSyncDirty = true;
+  saveCloudSyncConfig({
+    ...cloudSyncConfig,
+    pendingUploadAt: cloudSyncConfig.pendingUploadAt || new Date().toISOString()
+  });
+  cloudSyncStatus = navigator.onLine === false
+    ? "账单已保存在本机，联网后会自动同步"
+    : "账单已保存在本机，等待自动同步";
   if (cloudBackupTimer) window.clearTimeout(cloudBackupTimer);
   cloudBackupTimer = window.setTimeout(() => {
     cloudBackupTimer = null;
     uploadCloudBackup(false);
-  }, 3000);
+  }, delayMs);
 }
 
 async function uploadCloudBackup(manual = true) {
-  if (!cloudSyncConfig?.enabled || cloudSyncBusy) return false;
-  cloudSyncBusy = true;
-  if (manual) {
-    cloudSyncStatus = "正在上传云备份...";
-    render();
+  if (!cloudSyncConfig?.enabled) return false;
+  if (cloudSyncBusy) {
+    scheduleCloudBackup(1500);
+    return false;
   }
+  if (cloudBackupTimer) window.clearTimeout(cloudBackupTimer);
+  cloudBackupTimer = null;
+  cloudSyncBusy = true;
+  const attemptAt = new Date().toISOString();
+  saveCloudSyncConfig({ ...cloudSyncConfig, lastSyncAttemptAt: attemptAt });
+  cloudSyncStatus = manual ? "正在上传云备份..." : "正在自动上传云备份...";
+  if (manual || ui.tab === "settings") render();
   try {
     const encryptedPayload = await encryptCloudPayload(buildBackupPayload(), cloudSyncConfig.encryptionKey);
     const data = await cloudRequest("/api/backup", {
@@ -455,16 +525,27 @@ async function uploadCloudBackup(manual = true) {
     });
     saveCloudSyncConfig({
       ...cloudSyncConfig,
-      lastUploadedAt: data?.updatedAt || new Date().toISOString()
+      lastUploadedAt: data?.updatedAt || new Date().toISOString(),
+      lastSyncedAt: new Date().toISOString(),
+      lastSyncAttemptAt: attemptAt,
+      lastSyncError: null,
+      pendingUploadAt: null
     });
     cloudSyncDirty = false;
     cloudSyncStatus = manual ? "云备份已上传" : "";
+    clearCloudRetry();
     if (manual) showToast("云备份已上传");
     return true;
   } catch (error) {
-    cloudSyncStatus = error?.message === "forbidden"
-      ? "同步密码不匹配：这个手机号已绑定其它同步密码"
-      : "云备份失败：请检查 Worker 地址或网络";
+    cloudSyncStatus = cloudFailureText(error);
+    saveCloudSyncConfig({
+      ...cloudSyncConfig,
+      lastSyncAttemptAt: attemptAt,
+      lastSyncError: cloudSyncStatus,
+      pendingUploadAt: cloudSyncConfig.pendingUploadAt || attemptAt
+    });
+    cloudSyncDirty = true;
+    scheduleCloudRetry();
     if (manual) showToast(cloudSyncStatus);
     return false;
   } finally {
@@ -482,10 +563,10 @@ async function mergeCloudBackup({
 } = {}) {
   if (!cloudSyncConfig?.enabled || cloudSyncBusy) return false;
   cloudSyncBusy = true;
-  if (manual) {
-    cloudSyncStatus = "正在读取云备份...";
-    render();
-  }
+  const attemptAt = new Date().toISOString();
+  saveCloudSyncConfig({ ...cloudSyncConfig, lastSyncAttemptAt: attemptAt });
+  cloudSyncStatus = manual ? "正在读取云备份..." : "正在自动合并云端账单...";
+  if (manual || ui.tab === "settings") render();
   try {
     const data = await cloudRequest(`/api/backup?account=${encodeURIComponent(accountId)}`, {
       method: "GET",
@@ -503,7 +584,9 @@ async function mergeCloudBackup({
     }
     saveCloudSyncConfig({
       ...cloudSyncConfig,
-      lastRestoredAt: new Date().toISOString()
+      lastRestoredAt: new Date().toISOString(),
+      lastSyncAttemptAt: attemptAt,
+      lastSyncError: null
     });
     cloudSyncStatus = manual
       ? `已从云端合并 ${result.imported} 笔，新增 ${result.added} 笔`
@@ -519,9 +602,13 @@ async function mergeCloudBackup({
       if (manual) showToast(cloudSyncStatus);
       return true;
     }
-    cloudSyncStatus = error?.message === "forbidden"
-      ? "同步密码不匹配：这个手机号已绑定其它同步密码"
-      : "读取云备份失败：请检查账号、PIN 或网络";
+    cloudSyncStatus = cloudFailureText(error);
+    saveCloudSyncConfig({
+      ...cloudSyncConfig,
+      lastSyncAttemptAt: attemptAt,
+      lastSyncError: cloudSyncStatus
+    });
+    if (!manual) scheduleCloudRetry();
     if (manual) showToast(cloudSyncStatus);
     return false;
   } finally {
@@ -544,8 +631,25 @@ function scheduleStartupCloudSync() {
   if (!cloudSyncConfig?.enabled || cloudStartupSyncDone) return;
   cloudStartupSyncDone = true;
   window.setTimeout(() => {
-    syncCloudNow(false);
+    syncCloudNow(false).then((synced) => {
+      if (!synced) scheduleCloudRetry();
+    });
   }, 800);
+}
+
+function cloudSyncNeedsRefresh() {
+  if (!cloudSyncConfig?.enabled) return false;
+  if (cloudSyncDirty || cloudSyncConfig.pendingUploadAt || cloudSyncConfig.lastSyncError) return true;
+  const lastSyncedAt = new Date(cloudSyncConfig.lastSyncedAt || 0).getTime();
+  return !lastSyncedAt || Date.now() - lastSyncedAt > 15 * 60 * 1000;
+}
+
+function resumeCloudSync() {
+  if (!cloudSyncNeedsRefresh()) return;
+  clearCloudRetry();
+  syncCloudNow(false).then((synced) => {
+    if (!synced) scheduleCloudRetry();
+  });
 }
 
 async function enableCloudSync() {
@@ -572,7 +676,11 @@ async function enableCloudSync() {
       encryptionKey: identity.encryptionKey,
       identityVersion: identity.identityVersion,
       lastUploadedAt: null,
-      lastRestoredAt: null
+      lastRestoredAt: null,
+      lastSyncedAt: null,
+      lastSyncAttemptAt: null,
+      lastSyncError: null,
+      pendingUploadAt: null
     });
     cloudSyncBusy = false;
     await mergeCloudBackup({
@@ -600,6 +708,9 @@ async function enableCloudSync() {
 }
 
 function disableCloudSync() {
+  if (cloudBackupTimer) window.clearTimeout(cloudBackupTimer);
+  cloudBackupTimer = null;
+  clearCloudRetry();
   saveCloudSyncConfig(null);
   cloudStartupSyncDone = false;
   cloudSyncDirty = false;
@@ -1192,12 +1303,16 @@ function manualBackupShortText() {
 }
 
 function cloudSyncShortText() {
-  if (cloudSyncStatus) return cloudSyncStatus;
+  if (cloudSyncStatus && cloudStatusIsImportant()) return cloudSyncStatus;
   if (!cloudSyncConfig) return "未开启 · 开启后自动合并与上传";
   if (cloudSyncConfig.identityVersion !== 2) return "旧版配置 · 建议重新开启";
-  return cloudSyncConfig.lastUploadedAt
-    ? `已开启 · 上次同步 ${backupTimeLabel(cloudSyncConfig.lastUploadedAt)}`
-    : "已开启 · 等待首次同步";
+  if (cloudSyncConfig.lastSyncError) return cloudSyncConfig.lastSyncError;
+  if (cloudSyncConfig.pendingUploadAt) return navigator.onLine === false
+    ? "已保存本机 · 联网后自动同步"
+    : "已保存本机 · 等待自动同步";
+  return cloudSyncConfig.lastSyncedAt
+    ? `自动同步正常 · ${backupTimeLabel(cloudSyncConfig.lastSyncedAt)}`
+    : "自动同步已开启 · 等待首次同步";
 }
 
 function renderCompactSummary(items, label = "本月") {
@@ -1253,11 +1368,29 @@ function renderEmptyState(title, description, iconName = "sparkles") {
 function triggerMascotReaction() {
   const companion = document.querySelector("[data-mascot-companion]");
   if (!companion || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
-  companion.classList.remove("is-reacting");
-  void companion.offsetWidth;
-  companion.classList.add("is-reacting");
-  window.clearTimeout(mascotReactionTimer);
-  mascotReactionTimer = window.setTimeout(() => companion.classList.remove("is-reacting"), 920);
+  const playReaction = () => {
+    companion.classList.remove("is-reacting");
+    void companion.offsetWidth;
+    companion.classList.add("is-reacting");
+    window.clearTimeout(mascotReactionTimer);
+    mascotReactionTimer = window.setTimeout(() => companion.classList.remove("is-reacting"), 920);
+  };
+  const activeImage = companion.querySelector(".mascot-active");
+  if (activeImage?.dataset.src && !activeImage.hasAttribute("src")) {
+    if (activeImage.dataset.loading) return;
+    activeImage.dataset.loading = "true";
+    activeImage.addEventListener("load", () => {
+      delete activeImage.dataset.loading;
+      playReaction();
+    }, { once: true });
+    activeImage.addEventListener("error", () => {
+      delete activeImage.dataset.loading;
+      activeImage.removeAttribute("src");
+    }, { once: true });
+    activeImage.src = activeImage.dataset.src;
+    return;
+  }
+  playReaction();
 }
 
 function renderHome() {
@@ -1284,7 +1417,7 @@ function renderHome() {
         <button class="home-mascot-button" type="button" data-action="mascot-react" data-mascot-companion aria-label="和米糕打个招呼">
           <span class="mascot-stage" aria-hidden="true">
             <img class="home-mascot-image mascot-idle" src="./assets/black-shiba-mascot.png" alt="">
-            <img class="home-mascot-image mascot-active" src="./assets/black-shiba-mascot-active.png" alt="">
+            <img class="home-mascot-image mascot-active" data-src="./assets/black-shiba-mascot-active.png" alt="">
           </span>
         </button>
         <div class="summary-grid">
@@ -1619,7 +1752,7 @@ function renderSettings() {
           <div class="settings-row static-row"><span class="line-icon">${iconMarkup("currency-yuan", "line-glyph")}</span><span><strong>金额格式</strong><small>人民币元，固定保留两位小数</small></span></div>
         </div>
       </section>
-      <footer class="settings-version">米糕记账 v1.6.2 · 轻量、离线、不收费</footer>
+      <footer class="settings-version">米糕记账 v1.6.3 · 轻量、离线、不收费</footer>
     </div>`;
 }
 
@@ -1718,8 +1851,6 @@ function renderModals() {
 }
 
 function render() {
-  const shouldReactOnEntry = ui.tab === "home" && mascotEntryPending;
-  if (ui.tab !== "home") mascotEntryPending = true;
   document.querySelector("#page").innerHTML = {
     home: renderHome,
     ledger: renderLedger,
@@ -1734,10 +1865,6 @@ function render() {
   document.querySelectorAll(".nav-item[data-tab]").forEach((button) => {
     button.classList.toggle("active", button.dataset.tab === ui.tab);
   });
-  if (shouldReactOnEntry) {
-    mascotEntryPending = false;
-    window.setTimeout(triggerMascotReaction, 260);
-  }
   window.setTimeout(maybeReloadAfterServiceWorkerSwap, 0);
 }
 
@@ -2113,6 +2240,10 @@ function init() {
   document.addEventListener("pointercancel", stopTrendPointer);
   document.addEventListener("input", handleInput);
   document.addEventListener("change", handleBackupInput);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") resumeCloudSync();
+  });
+  window.addEventListener("online", resumeCloudSync);
   document.addEventListener("submit", (event) => {
     if (event.target.matches('[data-form="add-record"]')) saveDraft(event);
   });
