@@ -1513,7 +1513,7 @@ function renderStatistics() {
         <button class="${ui.statisticsMode === "ranking" ? "active" : ""}" type="button" data-action="statistics-mode" data-mode="ranking">排行</button>
         <button class="${ui.statisticsMode === "monthly" ? "active" : ""}" type="button" data-action="statistics-mode" data-mode="monthly">月报</button>
       </div>
-      ${renderMonthSwitcher()}
+      ${ui.statisticsMode === "monthly" ? "" : renderMonthSwitcher()}
       ${ui.statisticsMode === "trend" ? renderTrend(monthRecords) : ui.statisticsMode === "ranking" ? renderRanking(monthRecords) : renderMonthlyReport(monthRecords)}
       ${ui.statisticsMode === "monthly" ? "" : renderQuickStats(monthRecords)}
     </div>`;
@@ -1607,12 +1607,12 @@ function rankingStats(monthRecords) {
   })).sort((left, right) => right.amountCents - left.amountCents);
 }
 
-function renderCategoryDetailCard(selected) {
+function renderCategoryInlineDetails(selected) {
   return `
-    <section class="content-group category-detail-card" data-category-detail-card>
-      <div class="section-heading"><div><h2>${escapeHtml(selected.name)}明细</h2><div class="subtle">${selected.records.length} 笔支出 · 合计 ${formatMoney(selected.amountCents)}</div></div>${categoryIconMarkup(selected.id, "expense")}</div>
+    <div class="ranking-inline-details" data-category-detail-card>
+      <div class="ranking-inline-heading"><div>${categoryIconMarkup(selected.id, "expense")}<span><strong>${escapeHtml(selected.name)}明细</strong><small>${selected.records.length} 笔支出 · 合计 ${formatMoney(selected.amountCents)}</small></span></div><button class="ranking-inline-close" type="button" data-action="stats-category" data-category="${escapeHtml(selected.id)}">收起</button></div>
       <div class="record-list">${selected.records.map((record) => renderRecordRow(record, true)).join("")}</div>
-    </section>`;
+    </div>`;
 }
 
 function renderRanking(monthRecords) {
@@ -1621,20 +1621,108 @@ function renderRanking(monthRecords) {
     return `<section class="content-group empty-group">${renderEmptyState("还没有分类排行", "记录几笔支出后，就能看到消费去向", "tag")}</section>`;
   }
   const max = stats[0].amountCents || 1;
-  const selected = stats.find((item) => item.id === ui.statsCategoryId) || stats[0];
-  ui.statsCategoryId = selected.id;
+  const selected = stats.find((item) => item.id === ui.statsCategoryId) || null;
+  if (!selected) ui.statsCategoryId = null;
   return `
-    <section class="content-group stats-card">
-      <div class="section-heading"><div><h2>分类排行</h2><div class="subtle">按支出金额从高到低</div></div><span class="small-chip">${stats.length} 类</span></div>
-      <div class="ranking-list">
-        ${stats.map((item) => `
-          <button class="ranking-item ${item.id === selected.id ? "selected" : ""}" type="button" data-action="stats-category" data-category="${escapeHtml(item.id)}">
-            <div class="ranking-top">${categoryIconMarkup(item.id, "expense")}<span class="ranking-name">${escapeHtml(item.name)}</span><span class="ranking-count">${item.records.length} 笔</span><span class="ranking-value">${formatMoney(item.amountCents)}</span></div>
-            <div class="progress-track"><div class="progress-value" style="width:${(item.amountCents / max) * 100}%"></div></div>
-          </button>`).join("")}
+    <div class="ranking-view" data-ranking-view>
+      <section class="content-group stats-card">
+        <div class="section-heading"><div><h2>分类排行</h2><div class="subtle">点击分类查看明细</div></div><span class="small-chip">${stats.length} 类</span></div>
+        <div class="ranking-list">
+          ${stats.map((item) => `
+            <div class="ranking-entry">
+              <button class="ranking-item ${item.id === selected?.id ? "selected" : ""}" type="button" data-action="stats-category" data-category="${escapeHtml(item.id)}" aria-expanded="${item.id === selected?.id}">
+                <div class="ranking-top">${categoryIconMarkup(item.id, "expense")}<span class="ranking-name">${escapeHtml(item.name)}</span><span class="ranking-count">${item.records.length} 笔</span><span class="ranking-value">${formatMoney(item.amountCents)}</span></div>
+                <div class="progress-track"><div class="progress-value" style="width:${(item.amountCents / max) * 100}%"></div></div>
+              </button>
+              ${item.id === selected?.id ? renderCategoryInlineDetails(item) : ""}
+            </div>`).join("")}
+        </div>
+      </section>
+    </div>`;
+}
+
+function monthlyExpenses(year) {
+  return Array.from({ length: 12 }, (_, index) => {
+    const month = new Date(year, index, 1);
+    return { month, amountCents: sumCents(recordsForMonth(month), "expense") };
+  });
+}
+
+function renderMonthlyOverviewChart() {
+  const year = ui.monthCursor.getFullYear();
+  const monthly = monthlyExpenses(year);
+  const annualTotal = monthly.reduce((total, item) => total + item.amountCents, 0);
+  const monthlyAverage = Math.round(annualTotal / 12);
+  const max = Math.max(...monthly.map((item) => item.amountCents), 1);
+  const selectedIndex = ui.monthCursor.getMonth();
+  const chart = { width: 360, height: 232, left: 16, right: 16, top: 48, bottom: 38 };
+  const baseY = chart.height - chart.bottom;
+  const plotHeight = baseY - chart.top;
+  const spanX = chart.width - chart.left - chart.right;
+  const slotWidth = spanX / 12;
+  const points = monthly.map((item, index) => {
+    const x = chart.left + slotWidth * index + slotWidth / 2;
+    const height = item.amountCents ? Math.max(7, (item.amountCents / max) * plotHeight) : 0;
+    return { ...item, x, y: baseY - height };
+  });
+  const selectedPoint = points[selectedIndex];
+  const lastPoint = points[points.length - 1];
+  const gridLines = [.25, .5, .75].map((ratio) => {
+    const y = chart.top + plotHeight * ratio;
+    return `<line class="monthly-grid-line" x1="${chart.left}" y1="${y.toFixed(1)}" x2="${chart.width - chart.right}" y2="${y.toFixed(1)}"></line>`;
+  }).join("");
+  const linePath = points.map((point, index) => `${index ? "L" : "M"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ");
+  const areaPath = `M ${points[0].x.toFixed(1)} ${baseY} ${points.map((point) => `L ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ")} L ${lastPoint.x.toFixed(1)} ${baseY} Z`;
+  const labels = points.map((point, index) => `<text class="monthly-axis-label" x="${point.x.toFixed(1)}" y="${chart.height - 12}" text-anchor="middle">${pad(index + 1)}</text>`).join("");
+  const markers = points.map((point, index) => `
+    <circle class="monthly-point-halo ${index === selectedIndex ? "selected" : ""}" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="${index === selectedIndex ? 10 : 0}"></circle>
+    <circle class="monthly-point ${index === selectedIndex ? "selected" : ""} ${point.amountCents ? "has-value" : "is-zero"}" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="${index === selectedIndex ? 5 : point.amountCents ? 3 : 2}"></circle>`).join("");
+  const selectedBand = `<rect class="monthly-selected-band" x="${(selectedPoint.x - slotWidth / 2).toFixed(1)}" y="${chart.top}" width="${slotWidth.toFixed(1)}" height="${(baseY - chart.top).toFixed(1)}" rx="8"></rect>`;
+  const zones = points.map((point, index) => `<rect class="monthly-month-zone ${index === selectedIndex ? "selected" : ""}" data-action="monthly-month" data-month-index="${index}" x="${(point.x - slotWidth / 2).toFixed(1)}" y="${chart.top}" width="${slotWidth.toFixed(1)}" height="${(baseY - chart.top).toFixed(1)}" rx="8" aria-label="${index + 1}月 ${formatMoney(point.amountCents)}"></rect>`).join("");
+  const tooltipWidth = 124;
+  const tooltipX = Math.min(Math.max(selectedPoint.x - tooltipWidth / 2, 8), chart.width - tooltipWidth - 8);
+  const tooltip = `
+    <g class="monthly-tooltip visible">
+      <rect x="${tooltipX.toFixed(1)}" y="5" width="${tooltipWidth}" height="42" rx="10"></rect>
+      <path d="M ${selectedPoint.x.toFixed(1)} 48 l -6 -7 h 12 Z"></path>
+      <text x="${(tooltipX + 13).toFixed(1)}" y="23">${pad(selectedIndex + 1)}月</text>
+      <text class="monthly-tooltip-amount" x="${(tooltipX + 13).toFixed(1)}" y="40">${formatMoney(selectedPoint.amountCents)}</text>
+    </g>`;
+
+  return `
+    <section class="content-group monthly-overview-card">
+      <div class="section-heading monthly-overview-heading">
+        <div><h2>年度开销</h2><div class="subtle">点击月份查看对应月报</div></div>
+        <div class="monthly-year-switcher">
+          <button class="icon-button monthly-year-button" type="button" data-action="monthly-previous-year" aria-label="上一年">${iconMarkup("chevron-left", "button-glyph")}</button>
+          <strong>${year}</strong>
+          <button class="icon-button monthly-year-button" type="button" data-action="monthly-next-year" aria-label="下一年">${iconMarkup("chevron-right", "button-glyph")}</button>
+        </div>
       </div>
-    </section>
-    ${renderCategoryDetailCard(selected)}`;
+      <div class="monthly-chart-shell">
+        <svg class="monthly-chart" viewBox="0 0 ${chart.width} ${chart.height}" width="${chart.width}" height="${chart.height}" role="img" aria-label="${year}年每月支出折线图">
+          <defs>
+            <linearGradient id="monthly-area-gradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#ff5d68" stop-opacity=".22"></stop>
+              <stop offset="100%" stop-color="#ff5d68" stop-opacity=".015"></stop>
+            </linearGradient>
+          </defs>
+          ${gridLines}
+          ${selectedBand}
+          <path class="monthly-area" d="${areaPath}"></path>
+          <path class="monthly-line" d="${linePath}"></path>
+          ${markers}
+          ${tooltip}
+          <line class="monthly-axis" x1="${chart.left}" y1="${baseY}" x2="${chart.width - chart.right}" y2="${baseY}"></line>
+          ${labels}
+          ${zones}
+        </svg>
+      </div>
+      <div class="monthly-chart-summary">
+        <span><small>全年支出</small><strong class="expense-text">${formatMoney(annualTotal)}</strong></span>
+        <span><small>月均支出</small><strong>${formatMoney(monthlyAverage)}</strong></span>
+      </div>
+    </section>`;
 }
 
 function renderMonthlyReport(monthRecords) {
@@ -1669,22 +1757,27 @@ function renderMonthlyReport(monthRecords) {
   const activeDayAverage = activeDays ? Math.round(totals.expense / activeDays) : 0;
   const highestDayLabel = highestDay?.amountCents ? `${dayLabel(highestDay.date)} · ${formatMoney(highestDay.amountCents)}` : "暂无支出";
   const categoryTotal = totals.expense || 1;
+  const isCurrentMonth = sameMonth(ui.monthCursor, new Date());
+  const periodLabel = isCurrentMonth ? "本月" : `${ui.monthCursor.getMonth() + 1}月`;
+  const periodTitle = isCurrentMonth ? "本月总支出" : `${monthLabel(ui.monthCursor)} 总支出`;
 
   return `
+    <div class="monthly-report-view" data-monthly-report-view>
+    ${renderMonthlyOverviewChart()}
     <section class="content-group monthly-report-hero">
       <div class="monthly-report-heading">
-        <div><span class="eyebrow">月度复盘</span><h2>本月总支出</h2></div>
+        <div><span class="eyebrow">月度复盘</span><h2>${periodTitle}</h2></div>
         <span class="monthly-report-month">${monthLabel(ui.monthCursor)}</span>
       </div>
       <div class="monthly-report-total-row">
         <strong class="expense-text">${formatMoney(totals.expense)}</strong>
         <span class="monthly-report-change ${changeClass}">${changeText}</span>
       </div>
-      <div class="monthly-report-footline"><span>${expenseRecords.length} 笔支出 · ${activeDays} 个活跃日</span><span>结余 ${formatBalance(totals.balance)}</span></div>
+      <div class="monthly-report-footline"><span>${expenseRecords.length} 笔支出 · ${activeDays} 个活跃日</span><span>${periodLabel}结余 ${formatBalance(totals.balance)}</span></div>
     </section>
 
     <section class="content-group monthly-insights-group">
-      <div class="section-heading"><div><h2>本月看点</h2><div class="subtle">用几个数字快速读懂这个月</div></div></div>
+      <div class="section-heading"><div><h2>月度看点</h2><div class="subtle">用几个数字快速读懂这个月</div></div></div>
       <div class="monthly-insights-grid">
         <div class="monthly-insight monthly-insight-average">
           <span class="monthly-insight-icon">${iconMarkup("calendar", "monthly-insight-glyph")}</span>
@@ -1725,13 +1818,14 @@ function renderMonthlyReport(monthRecords) {
     </section>
 
     <section class="content-group monthly-highlights-group">
-      <div class="section-heading"><div><h2>本月大额支出</h2><div class="subtle">金额最高的 ${topRecords.length || 3} 笔记录</div></div></div>
-      ${topRecords.length ? `<div class="record-list monthly-record-list">${topRecords.map((record) => renderRecordRow(record)).join("")}</div>` : renderEmptyState("还没有大额支出", "本月记录后，这里会帮你留下消费重点", "receipt-2")}
+      <div class="section-heading"><div><h2>${periodLabel}大额支出</h2><div class="subtle">金额最高的 ${topRecords.length || 3} 笔记录</div></div></div>
+      ${topRecords.length ? `<div class="record-list monthly-record-list">${topRecords.map((record) => renderRecordRow(record)).join("")}</div>` : renderEmptyState("还没有大额支出", `${periodLabel}记录后，这里会帮你留下消费重点`, "receipt-2")}
       <div class="monthly-balance-strip">
-        <span><small>本月收入</small><strong class="income-text">${formatMoney(totals.income)}</strong></span>
-        <span><small>本月结余</small><strong class="${totals.balance < 0 ? "expense-text" : "income-text"}">${formatBalance(totals.balance)}</strong></span>
+        <span><small>${periodLabel}收入</small><strong class="income-text">${formatMoney(totals.income)}</strong></span>
+        <span><small>${periodLabel}结余</small><strong class="${totals.balance < 0 ? "expense-text" : "income-text"}">${formatBalance(totals.balance)}</strong></span>
       </div>
-    </section>`;
+    </section>
+    </div>`;
 }
 
 function renderQuickStats(monthRecords) {
@@ -1832,7 +1926,7 @@ function renderSettings() {
           <div class="settings-row static-row"><span class="line-icon">${iconMarkup("currency-yuan", "line-glyph")}</span><span><strong>金额格式</strong><small>人民币元，固定保留两位小数</small></span></div>
         </div>
       </section>
-      <footer class="settings-version">米糕记账 v1.6.5 · 轻量、离线、不收费</footer>
+      <footer class="settings-version">米糕记账 v1.6.6 · 轻量、离线、不收费</footer>
     </div>`;
 }
 
@@ -2112,7 +2206,7 @@ function navigateToTab(tabName, swipeDirection = 0) {
 }
 
 function swipeTargetIsInteractive(target) {
-  return !!target?.closest?.("button, a, input, select, textarea, summary, [contenteditable='true'], [data-action], [data-tab], .trend-chart, .calendar-grid, [data-no-swipe]");
+  return !!target?.closest?.("button, a, input, select, textarea, summary, [contenteditable='true'], [data-action], [data-tab], .trend-chart, .monthly-chart, .calendar-grid, [data-no-swipe]");
 }
 
 function handleNavigationTouchStart(event) {
@@ -2170,17 +2264,20 @@ function updateCalendarSelection(selectedDate) {
 }
 
 function updateStatsCategory(categoryId) {
-  ui.statsCategoryId = categoryId;
   if (ui.tab !== "statistics" || ui.statisticsMode !== "ranking") return false;
-  const detailCard = document.querySelector("[data-category-detail-card]");
-  if (!detailCard) return false;
   const stats = rankingStats(recordsForMonth(ui.monthCursor));
-  const selected = stats.find((item) => item.id === categoryId);
-  if (!selected) return false;
-  document.querySelectorAll(".ranking-item[data-category]").forEach((item) => {
-    item.classList.toggle("selected", item.dataset.category === categoryId);
-  });
-  detailCard.outerHTML = renderCategoryDetailCard(selected);
+  if (!stats.some((item) => item.id === categoryId)) return false;
+  ui.statsCategoryId = ui.statsCategoryId === categoryId ? null : categoryId;
+  const rankingView = document.querySelector("[data-ranking-view]");
+  if (!rankingView) return false;
+  rankingView.outerHTML = renderRanking(recordsForMonth(ui.monthCursor));
+  return true;
+}
+
+function updateMonthlyReportSelection() {
+  const reportView = document.querySelector("[data-monthly-report-view]");
+  if (!reportView || ui.tab !== "statistics" || ui.statisticsMode !== "monthly") return false;
+  reportView.outerHTML = renderMonthlyReport(recordsForMonth(ui.monthCursor));
   return true;
 }
 
@@ -2325,19 +2422,56 @@ function handleClick(event) {
       render();
       break;
     case "statistics-mode":
-      ui.statisticsMode = actionElement.dataset.mode;
+      {
+        const nextMode = actionElement.dataset.mode;
+        const previousMode = ui.statisticsMode;
+        const enteringMonthly = nextMode === "monthly" && previousMode !== "monthly";
+        ui.statisticsMode = nextMode;
+        if (enteringMonthly) {
+          ui.monthCursor = startOfMonth(new Date());
+          ui.selectedDate = dateKey(ui.monthCursor);
+          ui.trendSelectedDate = null;
+          ui.statsCategoryId = null;
+        } else if (nextMode === "ranking" && previousMode !== "ranking") {
+          ui.statsCategoryId = null;
+        }
+      }
       render();
+      break;
+    case "monthly-month":
+      {
+        const monthIndex = Number(actionElement.dataset.monthIndex);
+        if (!Number.isInteger(monthIndex) || monthIndex < 0 || monthIndex > 11) break;
+        ui.monthCursor = new Date(ui.monthCursor.getFullYear(), monthIndex, 1);
+        ui.selectedDate = dateKey(ui.monthCursor);
+        ui.trendSelectedDate = null;
+        if (!updateMonthlyReportSelection()) render();
+      }
+      break;
+    case "monthly-previous-year":
+      ui.monthCursor = new Date(ui.monthCursor.getFullYear() - 1, ui.monthCursor.getMonth(), 1);
+      ui.selectedDate = dateKey(ui.monthCursor);
+      ui.trendSelectedDate = null;
+      if (!updateMonthlyReportSelection()) render();
+      break;
+    case "monthly-next-year":
+      ui.monthCursor = new Date(ui.monthCursor.getFullYear() + 1, ui.monthCursor.getMonth(), 1);
+      ui.selectedDate = dateKey(ui.monthCursor);
+      ui.trendSelectedDate = null;
+      if (!updateMonthlyReportSelection()) render();
       break;
     case "previous-month":
       ui.monthCursor = addMonths(ui.monthCursor, -1);
       ui.selectedDate = dateKey(ui.monthCursor);
       ui.trendSelectedDate = null;
+      ui.statsCategoryId = null;
       render();
       break;
     case "next-month":
       ui.monthCursor = addMonths(ui.monthCursor, 1);
       ui.selectedDate = dateKey(ui.monthCursor);
       ui.trendSelectedDate = null;
+      ui.statsCategoryId = null;
       render();
       break;
     case "calendar-date":
