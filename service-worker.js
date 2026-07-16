@@ -1,4 +1,18 @@
-const CACHE_NAME = "bookkeeping2607-pwa-v28";
+const CACHE_NAME = "bookkeeping2607-pwa-v29";
+const ICON_FILES = [
+  "apple.svg", "arrow-back-up.svg", "arrow-up-circle.svg", "book-2.svg", "bottle.svg",
+  "briefcase.svg", "building-cottage.svg", "calendar.svg", "camera.svg", "car.svg",
+  "cash-banknote.svg", "chart-bar.svg", "chart-line.svg", "chart-pie.svg", "chevron-left.svg",
+  "chevron-right.svg", "clock-hour-4.svg", "cloud.svg", "credit-card.svg", "cup.svg",
+  "currency-yuan.svg", "database.svg", "device-gamepad-2.svg", "device-mobile.svg", "dots.svg",
+  "equal.svg", "file-download.svg", "file-upload.svg", "friends.svg", "gift.svg",
+  "gift-card.svg", "home.svg", "ice-cream-2.svg", "message-circle.svg", "music.svg",
+  "package.svg", "paw.svg", "pencil.svg", "pill.svg", "plus.svg", "receipt-2.svg",
+  "refresh.svg", "run.svg", "salad.svg", "school.svg", "settings.svg", "shirt.svg",
+  "shopping-bag.svg", "sparkles.svg", "star.svg", "sun.svg", "tag.svg",
+  "tools-kitchen-2.svg", "trash.svg", "user-circle.svg", "users.svg", "wallet.svg", "x.svg"
+].map((name) => `./assets/icons/${name}`);
+
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -7,7 +21,9 @@ const APP_SHELL = [
   "./manifest.webmanifest",
   "./service-worker.js",
   "./assets/black-shiba-mascot.png",
-  "./assets/black-shiba-mascot-active.png"
+  "./assets/black-shiba-mascot-active.png",
+  "./assets/mint-paper-texture.webp",
+  ...ICON_FILES
 ];
 
 const CORE_PATHS = [
@@ -18,7 +34,8 @@ const CORE_PATHS = [
   "/manifest.webmanifest",
   "/service-worker.js",
   "/assets/black-shiba-mascot.png",
-  "/assets/black-shiba-mascot-active.png"
+  "/assets/black-shiba-mascot-active.png",
+  "/assets/mint-paper-texture.webp"
 ];
 
 function isSameOrigin(request) {

@@ -49,6 +49,59 @@ const CATEGORY_SETS = {
   ]
 };
 
+const CATEGORY_ICON_NAMES = Object.freeze({
+  food: "tools-kitchen-2",
+  transport: "car",
+  daily: "bottle",
+  shopping: "shopping-bag",
+  snack: "ice-cream-2",
+  drink: "cup",
+  vegetable: "salad",
+  fruit: "apple",
+  clothes: "shirt",
+  entertainment: "music",
+  beauty: "sparkles",
+  communication: "device-mobile",
+  medical: "pill",
+  learning: "school",
+  game: "device-gamepad-2",
+  "red-packet": "gift-card",
+  family: "users",
+  housing: "building-cottage",
+  delivery: "package",
+  social: "friends",
+  gift: "gift",
+  pet: "paw",
+  car: "car",
+  digital: "camera",
+  books: "book-2",
+  office: "briefcase",
+  sport: "run",
+  "other-expense": "dots",
+  salary: "wallet",
+  bonus: "star",
+  "part-time": "clock-hour-4",
+  "income-red-packet": "gift-card",
+  refund: "arrow-back-up",
+  investment: "chart-line",
+  "other-income": "dots",
+  cash: "cash-banknote",
+  wechat: "message-circle",
+  alipay: "currency-yuan",
+  "bank-card": "credit-card",
+  "other-transfer": "dots"
+});
+
+function iconMarkup(name, className = "") {
+  const classes = ["app-icon", className].filter(Boolean).join(" ");
+  return `<img class="${classes}" src="./assets/icons/${name}.svg" alt="" aria-hidden="true" decoding="async">`;
+}
+
+function categoryIconMarkup(categoryId, className = "expense") {
+  const iconName = CATEGORY_ICON_NAMES[categoryId] || "dots";
+  return `<span class="category-icon ${className}">${iconMarkup(iconName, "category-glyph")}</span>`;
+}
+
 const ui = {
   tab: "home",
   ledgerMode: "flow",
@@ -1113,9 +1166,9 @@ function renderSummary(items, label = "本月") {
 function renderMonthSwitcher() {
   return `
     <div class="month-switcher">
-      <button type="button" data-action="previous-month" aria-label="上个月">‹</button>
+      <button type="button" data-action="previous-month" aria-label="上个月">${iconMarkup("chevron-left", "month-chevron")}</button>
       <strong>${monthLabel(ui.monthCursor)}</strong>
-      <button type="button" data-action="next-month" aria-label="下个月">›</button>
+      <button type="button" data-action="next-month" aria-label="下个月">${iconMarkup("chevron-right", "month-chevron")}</button>
     </div>`;
 }
 
@@ -1127,7 +1180,7 @@ function renderRecordRow(record, deletable = false) {
   return `
     <div class="record-row">
       <div class="record-main">
-        <span class="category-icon ${meta.className}">${escapeHtml(record.categoryIcon)}</span>
+        ${categoryIconMarkup(record.categoryId, meta.className)}
         <div class="record-copy">
           <strong>${escapeHtml(record.categoryName)}</strong>
           <span>${escapeHtml(detail)}</span>
@@ -1135,13 +1188,13 @@ function renderRecordRow(record, deletable = false) {
       </div>
       <div class="row-between" style="justify-content:flex-end; flex:0 0 auto;">
         <strong class="record-amount ${meta.className}-text">${formatSigned(record)}</strong>
-        ${deletable ? `<button class="icon-button danger" type="button" data-action="delete-record" data-id="${escapeHtml(record.id)}" aria-label="删除记录">×</button>` : ""}
+        ${deletable ? `<button class="icon-button danger" type="button" data-action="delete-record" data-id="${escapeHtml(record.id)}" aria-label="删除记录">${iconMarkup("trash", "button-glyph")}</button>` : ""}
       </div>
     </div>`;
 }
 
-function renderEmptyState(title, description, mark = "✦") {
-  return `<div class="empty-state"><div class="empty-mark">${mark}</div><strong>${title}</strong><span>${description}</span></div>`;
+function renderEmptyState(title, description, iconName = "sparkles") {
+  return `<div class="empty-state"><div class="empty-mark">${iconMarkup(iconName, "empty-glyph")}</div><strong>${title}</strong><span>${description}</span></div>`;
 }
 
 function triggerMascotReaction() {
@@ -1165,17 +1218,15 @@ function renderHome() {
     <div class="page page-home">
       <section class="home-intro">
         <div class="home-intro-copy">
-          <span class="eyebrow">默认账本</span>
           <h1>米糕记账</h1>
-          <p>嗨，米糕陪你记录每一笔 ✦</p>
+          <p>嗨，米糕陪你记录每一笔</p>
           <span class="home-date">${longDateLabel(today)}</span>
         </div>
       </section>
 
       <section class="paper-card home-summary-card">
         <div class="summary-heading home-summary-heading">
-          <div><strong>本月概览</strong><span>${monthLabel(today)}</span></div>
-          <button class="home-summary-detail" type="button" data-tab="ledger">查看明细 <span aria-hidden="true">›</span></button>
+          <button class="home-summary-title" type="button" data-tab="ledger"><strong>${monthLabel(today)} 月度摘要</strong>${iconMarkup("chevron-right", "chevron-glyph")}</button>
         </div>
         <button class="home-mascot-button" type="button" data-action="mascot-react" data-mascot-companion aria-label="和米糕打个招呼">
           <span class="mascot-stage" aria-hidden="true">
@@ -1184,30 +1235,32 @@ function renderHome() {
           </span>
         </button>
         <div class="summary-grid">
-          <div class="summary-item"><span>本月支出</span><strong class="expense-text">${formatMoney(totals.expense)}</strong></div>
-          <div class="summary-item"><span>本月收入</span><strong class="income-text">${formatMoney(totals.income)}</strong></div>
-          <div class="summary-item"><span>本月结余</span><strong class="ink-text">${formatBalance(totals.balance)}</strong></div>
+          <div class="summary-item"><span>支出</span><strong class="expense-text">${formatMoney(totals.expense)}</strong><span class="summary-symbol expense-symbol">${iconMarkup("wallet", "summary-glyph")}</span></div>
+          <div class="summary-item"><span>收入</span><strong class="income-text">${formatMoney(totals.income)}</strong><span class="summary-symbol income-symbol">${iconMarkup("arrow-up-circle", "summary-glyph")}</span></div>
+          <div class="summary-item"><span>结余</span><strong class="balance-text">${formatBalance(totals.balance)}</strong><span class="summary-symbol balance-symbol">${iconMarkup("equal", "summary-glyph")}</span></div>
         </div>
-        <button class="home-primary-action" type="button" data-action="add">
-          <span class="home-primary-icon" aria-hidden="true"><svg viewBox="0 0 28 28"><path d="M6.5 17.6 17 7.1l4 4L10.5 21.6 5.2 23Z"></path><path d="m15.6 8.5 4 4"></path><path d="m6.5 17.6 4 4L5.2 23Z"></path></svg></span>
-          <span>记一笔</span>
-        </button>
+        <button class="home-summary-footer" type="button" data-tab="ledger"><span>本月记录 <strong>${monthRecords.length}</strong> 笔</span>${iconMarkup("chevron-right", "chevron-glyph")}</button>
       </section>
 
+      <button class="home-primary-action" type="button" data-action="add">
+        <span class="home-primary-icon" aria-hidden="true">${iconMarkup("pencil", "primary-glyph")}</span>
+        <span>记一笔</span>
+      </button>
+
       <section class="paper-card receipt-card">
-        <div class="summary-heading"><strong>今日记录</strong><span class="expense-text">${formatMoney(todayExpense)}</span></div>
-        ${todayRecords.length ? `<div class="record-list">${todayRecords.slice(0, 6).map((record) => renderRecordRow(record)).join("")}</div>` : renderEmptyState("今天还没有记录", "点下面的铅笔，记下第一笔吧", "📝")}
-        <div class="receipt-total"><span>今日支出</span><strong class="expense-text">${formatMoney(todayExpense)}</strong></div>
+        <div class="summary-heading today-heading"><strong>今日记录</strong><span class="today-date">${dateKey(today).replace(/-/g, ".")} ${iconMarkup("calendar", "calendar-glyph")}</span></div>
+        ${todayRecords.length ? `<div class="record-list">${todayRecords.slice(0, 3).map((record) => renderRecordRow(record)).join("")}</div>` : renderEmptyState("今天还没有记录", "点下面的铅笔，记下第一笔吧", "pencil")}
+        <div class="receipt-footer">
+          <button class="home-records-link" type="button" data-tab="ledger">查看全部记录 ${iconMarkup("chevron-right", "chevron-glyph")}</button>
+          <div class="receipt-total"><span>今日支出</span><strong class="expense-text">${formatMoney(todayExpense)}</strong></div>
+        </div>
       </section>
 
       <section class="paper-card migao-reminder-card">
-        <div class="section-heading"><div><h2>米糕提醒</h2><div class="subtle">账单只保存在这台设备的浏览器里</div></div><span class="reminder-mark" aria-hidden="true">🐕</span></div>
+        <div class="section-heading"><div><h2>米糕小贴士</h2><div class="subtle">账单保存在这台设备的浏览器里</div></div><span class="reminder-mark" aria-hidden="true">${iconMarkup("paw", "reminder-glyph")}</span></div>
         <p class="subtle reminder-copy">长期使用请固定从主屏幕 Web App 打开，并定期在“我的 → 数据管理”导出 JSON 备份。网页更新不会清空账单，但清除网站数据或换设备会丢失本机数据。</p>
-      </section>
-
-      <section class="paper-card home-help-card">
         <div class="home-help-row">
-          <span class="offline-chip">● 离线可用</span>
+          <span class="offline-chip">${iconMarkup("database", "chip-glyph")} 离线可用</span>
           <button class="small-chip home-install-button" type="button" data-action="help">怎么安装到 iPhone？</button>
         </div>
       </section>
@@ -1221,7 +1274,7 @@ function renderLedger() {
     <div class="page">
       <div class="page-title-row">
         <div><span class="eyebrow">流水 · 日历</span><h1>账单</h1></div>
-        <button class="round-button" type="button" data-action="add" aria-label="记一笔">＋</button>
+        <button class="round-button" type="button" data-action="add" aria-label="记一笔">${iconMarkup("plus", "button-glyph")}</button>
       </div>
       <div class="segmented">
         <button class="${ui.ledgerMode === "flow" ? "active" : ""}" type="button" data-action="ledger-mode" data-mode="flow">流水</button>
@@ -1235,7 +1288,7 @@ function renderLedger() {
 
 function renderFlow(monthRecords) {
   if (!monthRecords.length) {
-    return `<section class="paper-card">${renderEmptyState("这个月还没有记录", "点右上角的加号，开始记账吧", "🧾")}</section>`;
+    return `<section class="paper-card">${renderEmptyState("这个月还没有记录", "点右上角的加号，开始记账吧", "receipt-2")}</section>`;
   }
 
   const groups = new Map();
@@ -1261,7 +1314,7 @@ function renderSelectedDateCard(selectedKey) {
   return `
     <section class="paper-card selected-date-card" data-selected-date-card>
       <div class="section-heading"><div><h2>${dayLabel(dateFromKey(selectedKey))}</h2><div class="subtle">当天记录</div></div><span class="small-chip">${selectedRecords.length} 笔</span></div>
-      ${selectedRecords.length ? `<div class="record-list">${selectedRecords.map((record) => renderRecordRow(record, true)).join("")}</div>` : renderEmptyState("这一天还没有记录", "选择其他日期，或直接记一笔", "☀")}
+      ${selectedRecords.length ? `<div class="record-list">${selectedRecords.map((record) => renderRecordRow(record, true)).join("")}</div>` : renderEmptyState("这一天还没有记录", "选择其他日期，或直接记一笔", "sun")}
     </section>`;
 }
 
@@ -1334,7 +1387,10 @@ function renderTrend(monthRecords) {
     return `<line class="trend-grid-line" x1="${chart.left}" y1="${y.toFixed(1)}" x2="${chart.width - chart.right}" y2="${y.toFixed(1)}"></line>`;
   }).join("");
   const dayLabels = points
-    .filter((point) => point.date.getDate() === 1 || point.date.getDate() % 5 === 0 || point === lastPoint)
+    .filter((point) => {
+      const day = point.date.getDate();
+      return day === 1 || day % 5 === 0 || (point === lastPoint && day % 5 >= 2);
+    })
     .map((point) => `<text class="trend-axis-label" x="${point.x.toFixed(1)}" y="${chart.height - 12}" text-anchor="middle">${pad(point.date.getDate())}</text>`)
     .join("");
   const pointNodes = points.map((point) => `
@@ -1394,7 +1450,7 @@ function renderTrend(monthRecords) {
   return `
     <section class="paper-card stats-card">
       <div class="section-heading"><div><h2>支出趋势</h2><div class="subtle">每天的支出金额</div></div><span class="expense-text" style="font-weight:900;">${formatMoney(total)}</span></div>
-      ${total ? `<div class="chart-wrap">${lineChart}</div><div class="chart-note">整月完整展示 · 轻触日期区域可看当天金额</div>` : renderEmptyState("还没有支出趋势", "开始记账后，这里会慢慢长出曲线", "📊")}
+      ${total ? `<div class="chart-wrap">${lineChart}</div><div class="chart-note">整月完整展示 · 轻触日期区域可看当天金额</div>` : renderEmptyState("还没有支出趋势", "开始记账后，这里会慢慢长出曲线", "chart-bar")}
     </section>`;
 }
 
@@ -1417,7 +1473,7 @@ function rankingStats(monthRecords) {
 function renderCategoryDetailCard(selected) {
   return `
     <section class="paper-card category-detail-card" data-category-detail-card>
-      <div class="section-heading"><div><h2>${escapeHtml(selected.name)}明细</h2><div class="subtle">${selected.records.length} 笔支出 · 合计 ${formatMoney(selected.amountCents)}</div></div><span class="category-icon expense">${escapeHtml(selected.icon)}</span></div>
+      <div class="section-heading"><div><h2>${escapeHtml(selected.name)}明细</h2><div class="subtle">${selected.records.length} 笔支出 · 合计 ${formatMoney(selected.amountCents)}</div></div>${categoryIconMarkup(selected.id, "expense")}</div>
       <div class="record-list">${selected.records.map((record) => renderRecordRow(record, true)).join("")}</div>
     </section>`;
 }
@@ -1425,7 +1481,7 @@ function renderCategoryDetailCard(selected) {
 function renderRanking(monthRecords) {
   const stats = rankingStats(monthRecords);
   if (!stats.length) {
-    return `<section class="paper-card">${renderEmptyState("还没有分类排行", "记录几笔支出后，就能看到消费去向", "🏷")}</section>`;
+    return `<section class="paper-card">${renderEmptyState("还没有分类排行", "记录几笔支出后，就能看到消费去向", "tag")}</section>`;
   }
   const max = stats[0].amountCents || 1;
   const selected = stats.find((item) => item.id === ui.statsCategoryId) || stats[0];
@@ -1436,7 +1492,7 @@ function renderRanking(monthRecords) {
       <div class="ranking-list">
         ${stats.map((item) => `
           <button class="ranking-item ${item.id === selected.id ? "selected" : ""}" type="button" data-action="stats-category" data-category="${escapeHtml(item.id)}">
-            <div class="ranking-top"><span class="category-icon expense">${escapeHtml(item.icon)}</span><span class="ranking-name">${escapeHtml(item.name)}</span><span class="ranking-count">${item.records.length} 笔</span><span class="ranking-value">${formatMoney(item.amountCents)}</span></div>
+            <div class="ranking-top">${categoryIconMarkup(item.id, "expense")}<span class="ranking-name">${escapeHtml(item.name)}</span><span class="ranking-count">${item.records.length} 笔</span><span class="ranking-value">${formatMoney(item.amountCents)}</span></div>
             <div class="progress-track"><div class="progress-value" style="width:${(item.amountCents / max) * 100}%"></div></div>
           </button>`).join("")}
       </div>
@@ -1464,21 +1520,21 @@ function renderSettings() {
   const preview = categoriesFor("expense").slice(0, 8);
   return `
     <div class="page">
-      <div class="page-title-row"><div><span class="eyebrow">本地 · 米糕</span><h1>我的</h1></div><span class="small-chip">v1.4</span></div>
+      <div class="page-title-row"><div><span class="eyebrow">本地 · 米糕</span><h1>我的</h1></div><span class="small-chip">v1.5</span></div>
       <section class="paper-card">
         <div class="settings-brand"><img class="mascot small" src="./assets/black-shiba-mascot.png" alt="米糕黑柴"><div class="settings-brand-copy"><strong>米糕记账</strong><span>记录每一个值得记住的日常</span></div></div>
       </section>
       <section class="paper-card">
         <div class="section-heading"><div><h2>基础分类</h2><div class="subtle">第一版内置常用分类</div></div><span class="small-chip">28 类支出</span></div>
-        <div class="category-summary">${preview.map((item) => `<div class="category-summary-item"><span class="category-icon expense">${item.icon}</span><span>${item.name}</span></div>`).join("")}</div>
+        <div class="category-summary">${preview.map((item) => `<div class="category-summary-item">${categoryIconMarkup(item.id, "expense")}<span>${item.name}</span></div>`).join("")}</div>
       </section>
       <section class="paper-card">
         <div class="section-heading"><div><h2>当前版本</h2><div class="subtle">轻量、离线、不收费</div></div></div>
         <div class="settings-list">
-          <div class="settings-line"><span class="line-icon">▣</span><span>账单保存在本机浏览器</span><small>${records.length} 笔</small></div>
-          <div class="settings-line"><span class="line-icon">¥</span><span>人民币元，固定两位小数</span></div>
-          <div class="settings-line"><span class="line-icon">⌁</span><span>网页更新不改变本地数据</span></div>
-          <div class="settings-line"><span class="line-icon">↻</span><span>${autoBackupText()}</span></div>
+          <div class="settings-line"><span class="line-icon">${iconMarkup("database", "line-glyph")}</span><span>账单保存在本机浏览器</span><small>${records.length} 笔</small></div>
+          <div class="settings-line"><span class="line-icon">${iconMarkup("currency-yuan", "line-glyph")}</span><span>人民币元，固定两位小数</span></div>
+          <div class="settings-line"><span class="line-icon">${iconMarkup("refresh", "line-glyph")}</span><span>网页更新不改变本地数据</span></div>
+          <div class="settings-line"><span class="line-icon">${iconMarkup("cloud", "line-glyph")}</span><span>${autoBackupText()}</span></div>
         </div>
         <div class="settings-actions">
           <button class="action-button secondary" type="button" data-action="refresh-app">刷新到最新版本</button>
@@ -1492,7 +1548,7 @@ function renderSettings() {
           <div><strong>2</strong><span>回到主屏幕 Web App，使用同一手机号和同步密码开启云备份</span></div>
           <div><strong>3</strong><span>以后打开自动合并，保存账单后自动上传</span></div>
         </div>
-        <div class="backup-auto-note">↻ ${autoBackupText()}</div>
+        <div class="backup-auto-note">${iconMarkup("refresh", "inline-glyph")} ${autoBackupText()}</div>
         <div class="backup-manual-note">${manualBackupText()}</div>
         <div class="backup-actions">
           <button class="action-button secondary" type="button" data-action="export-data">导出 JSON 备份</button>
@@ -1503,7 +1559,7 @@ function renderSettings() {
       <section class="paper-card cloud-card">
         <div class="section-heading"><div><h2>云备份</h2><div class="subtle">手机号作为账号，同步密码/PIN 负责加密</div></div><span class="small-chip">可选</span></div>
         <div class="subtle backup-note">云备份用于换手机、重装或自动合并 Safari/Web App 两套账单。账单上传前会在本机加密，云端只保存密文；请记住手机号和同步密码，忘记密码无法解密云端备份。</div>
-        <div class="backup-auto-note">☁ ${cloudSyncText()}</div>
+        <div class="backup-auto-note">${iconMarkup("cloud", "inline-glyph")} ${cloudSyncText()}</div>
         ${cloudSyncConfig ? `
           <div class="backup-actions">
             <button class="action-button secondary" type="button" data-action="cloud-sync" ${cloudSyncBusy ? "disabled" : ""}>立即同步</button>
@@ -1519,7 +1575,7 @@ function renderSettings() {
         `}
       </section>
       <section class="paper-card">
-        <div class="section-heading"><div><h2>主屏幕入口</h2><div class="subtle">长期使用固定从 Web App 打开</div></div><span>🐕</span></div>
+        <div class="section-heading"><div><h2>主屏幕入口</h2><div class="subtle">长期使用固定从 Web App 打开</div></div><span class="reminder-mark">${iconMarkup("paw", "reminder-glyph")}</span></div>
         <div class="subtle" style="line-height:1.65;">用 Safari 第一次打开网址并添加到主屏幕；之后日常记账、查看和导入备份都从主屏幕图标进入。不要把 Safari 地址栏里的页面当成另一个日常账本。</div>
       </section>
     </div>`;
@@ -1532,7 +1588,7 @@ function renderAddModal() {
   return `
     <div class="modal-backdrop" data-action="close-modal">
       <section class="modal-sheet add-modal-sheet ${ui.quickEntry ? "quick-entry-sheet" : ""}" data-modal-sheet aria-label="记一笔">
-        <div class="modal-heading"><h2>${ui.quickEntry ? "快速记一笔" : "记一笔"}</h2><button class="close-button" type="button" data-action="close-modal" aria-label="关闭">×</button></div>
+        <div class="modal-heading"><h2>${ui.quickEntry ? "快速记一笔" : "记一笔"}</h2><button class="close-button" type="button" data-action="close-modal" aria-label="关闭">${iconMarkup("x", "close-glyph")}</button></div>
         <form class="add-record-form" data-form="add-record">
           <div class="add-form-scroll">
             <div class="type-pills">
@@ -1547,7 +1603,7 @@ function renderAddModal() {
             </section>
             <section class="paper-card form-card">
               <div class="section-heading"><div><h2>选择分类</h2><div class="subtle">基础分类 · 常用分类优先</div></div></div>
-              <div class="category-grid">${categories.map((category) => `<button class="category-button ${draft.categoryId === category.id ? "selected" : ""}" type="button" data-action="select-category" data-category="${category.id}"><span class="category-icon ${meta.className}">${category.icon}</span><span>${category.name}</span></button>`).join("")}</div>
+              <div class="category-grid">${categories.map((category) => `<button class="category-button ${draft.categoryId === category.id ? "selected" : ""}" type="button" data-action="select-category" data-category="${category.id}">${categoryIconMarkup(category.id, meta.className)}<span>${category.name}</span></button>`).join("")}</div>
             </section>
             <section class="paper-card form-card">
               <div class="field-grid">
@@ -1569,7 +1625,7 @@ function renderHelpModal() {
   return `
     <div class="modal-backdrop" data-action="close-help">
       <section class="modal-sheet" data-modal-sheet aria-label="安装说明">
-        <div class="modal-heading"><h2>添加到 iPhone</h2><button class="close-button" type="button" data-action="close-help" aria-label="关闭">×</button></div>
+        <div class="modal-heading"><h2>添加到 iPhone</h2><button class="close-button" type="button" data-action="close-help" aria-label="关闭">${iconMarkup("x", "close-glyph")}</button></div>
         <div class="help-copy">
           <div class="help-step"><b>1</b><div>用 <strong>Safari</strong> 打开这个 PWA 的网址。</div></div>
           <div class="help-step"><b>2</b><div>点击底部或顶部的<strong>分享</strong>按钮。</div></div>

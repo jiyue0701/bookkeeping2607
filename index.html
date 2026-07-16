@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <meta name="theme-color" content="#2abdb0">
+  <meta name="theme-color" content="#f4fbf8">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="米糕记账">
   <meta name="description" content="米糕陪你记录每一笔日常支出与收入">
   <link rel="manifest" href="./manifest.webmanifest">
@@ -21,58 +21,28 @@
     <nav class="bottom-nav" aria-label="主导航">
       <button class="nav-item" data-tab="home" type="button">
         <span class="nav-icon" aria-hidden="true">
-          <svg viewBox="0 0 28 28">
-            <path d="M5.5 12.8 14 5.2l8.5 7.6"></path>
-            <path d="M8 11.6v10.2h12V11.6"></path>
-            <path d="M11.5 21.8v-6h5v6"></path>
-          </svg>
+          <img class="nav-glyph" src="./assets/icons/home.svg" alt="">
         </span><span>首页</span>
       </button>
       <button class="nav-item" data-tab="ledger" type="button">
         <span class="nav-icon" aria-hidden="true">
-          <svg viewBox="0 0 28 28">
-            <path d="M8.2 5.5h11.6a2 2 0 0 1 2 2v15l-2.4-1.4-2.4 1.4-2.4-1.4-2.4 1.4-2.4-1.4-2.4 1.4v-15a2 2 0 0 1 2-2Z"></path>
-            <path d="M10.7 10.3h6.6"></path>
-            <path d="M10.7 14h8.6"></path>
-            <path d="M10.7 17.7h5.8"></path>
-          </svg>
+          <img class="nav-glyph" src="./assets/icons/receipt-2.svg" alt="">
         </span><span>账单</span>
       </button>
       <button class="nav-add" data-action="add" type="button" aria-label="记一笔">
         <span class="nav-add-core" aria-hidden="true">
-          <svg viewBox="0 0 28 28">
-            <g class="pencil-icon">
-              <path class="pencil-body" d="M6.5 17.6 17 7.1l4 4L10.5 21.6 5.2 23Z"></path>
-              <path class="pencil-band" d="m15.6 8.5 4 4"></path>
-              <path class="pencil-wood" d="m6.5 17.6 4 4L5.2 23Z"></path>
-              <path class="pencil-tip" d="M5.2 23 7 22.5"></path>
-            </g>
-          </svg>
+          <img class="nav-add-glyph" src="./assets/icons/pencil.svg" alt="">
         </span>
         <span class="nav-add-label">记一笔</span>
       </button>
       <button class="nav-item" data-tab="statistics" type="button">
         <span class="nav-icon" aria-hidden="true">
-          <svg viewBox="0 0 28 28">
-            <rect x="5.2" y="7.2" width="17.6" height="13.6" rx="2.2"></rect>
-            <path d="M9.2 17.4v-3.2"></path>
-            <path d="M14 17.4v-6"></path>
-            <path d="M18.8 17.4v-8.1"></path>
-            <path d="M8.7 21.9h10.6"></path>
-          </svg>
+          <img class="nav-glyph" src="./assets/icons/chart-pie.svg" alt="">
         </span><span>统计</span>
       </button>
       <button class="nav-item" data-tab="settings" type="button">
         <span class="nav-icon" aria-hidden="true">
-          <svg class="migao-nav-icon" viewBox="0 0 28 28">
-            <path class="migao-ear" d="M8.4 10.1 6.5 6.8l4.1 1.5"></path>
-            <path class="migao-ear" d="m19.6 10.1 1.9-3.3-4.1 1.5"></path>
-            <path class="migao-head" d="M6.8 14.5c0-4.3 3-7.1 7.2-7.1s7.2 2.8 7.2 7.1c0 4.1-2.8 6.8-7.2 6.8s-7.2-2.7-7.2-6.8Z"></path>
-            <path class="migao-mask" d="M10.4 15.6c1.1 2.2 6.1 2.2 7.2 0 .4 2.3-1.2 3.7-3.6 3.7s-4-1.4-3.6-3.7Z"></path>
-            <circle class="migao-eye" cx="11.3" cy="13.3" r="1"></circle>
-            <circle class="migao-eye" cx="16.7" cy="13.3" r="1"></circle>
-            <path class="migao-mouth" d="M13.1 16.4h1.8"></path>
-          </svg>
+          <img class="nav-glyph" src="./assets/icons/user-circle.svg" alt="">
         </span><span>我的</span>
       </button>
     </nav>
